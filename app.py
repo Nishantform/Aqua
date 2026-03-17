@@ -184,7 +184,7 @@ st.markdown("""
 
 # Hardcoded admin credentials (in production, use environment variables or database)
 ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "AquaStat@2025"  # This should be hashed in production
+ADMIN_PASSWORD = "admin@2025"  # This should be hashed in production
 
 def check_password():
     """Returns `True` if the user is authenticated."""
