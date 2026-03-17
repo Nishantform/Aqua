@@ -182,12 +182,8 @@ st.markdown("""
 # AUTHENTICATION SYSTEM
 # -------------------------
 
-# Hardcoded admin credentials (in production, use environment variables or database)
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "admin@2025"  # This should be hashed in production
-
 def check_password():
-    """Returns `True` if the user is authenticated."""
+    """Returns `True` if the user is authenticated using Streamlit secrets."""
     
     def login_form():
         """Form with widgets to login"""
@@ -198,10 +194,21 @@ def check_password():
             submitted = st.form_submit_button("Login")
             
             if submitted:
-                if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+                # Get credentials from secrets
+                try:
+                    admin_username = st.secrets["ADMIN_USERNAME"]
+                    admin_password = st.secrets["ADMIN_PASSWORD"]
+                except Exception as e:
+                    st.error(f"Admin credentials not configured in secrets: {e}")
+                    return False
+                
+                # Use constant-time comparison
+                if hmac.compare_digest(username, admin_username) and \
+                   hmac.compare_digest(password, admin_password):
                     st.session_state["authenticated"] = True
                     st.session_state["username"] = username
                     st.session_state["is_admin"] = True
+                    st.session_state["auth_time"] = datetime.now().timestamp()
                     st.rerun()
                 else:
                     st.error("Invalid username or password")
@@ -210,13 +217,20 @@ def check_password():
     
     def logout():
         if st.button("Logout"):
-            st.session_state["authenticated"] = False
-            st.session_state["is_admin"] = False
-            st.session_state.pop("username", None)
+            # Clear all session state
+            for key in ["authenticated", "is_admin", "username", "auth_time"]:
+                if key in st.session_state:
+                    del st.session_state[key]
             st.rerun()
     
-    # Check if already authenticated
+    # Check if already authenticated (with timeout)
     if st.session_state.get("authenticated", False):
+        # Check session timeout (8 hours)
+        auth_time = st.session_state.get("auth_time", 0)
+        if datetime.now().timestamp() - auth_time > 28800:  # 8 hours
+            logout()
+            return False
+        
         # Show logout button in sidebar
         with st.sidebar:
             st.markdown("---")
@@ -244,24 +258,29 @@ NEON_URL = st.secrets["NEON_URL"]
 def init_connection():
     """Initialize Neon PostgreSQL database connection using SQLAlchemy"""
     try:
-        # Create SQLAlchemy engine with connection pooling
+        # Create SQLAlchemy engine with proper transaction handling
         engine = create_engine(
             NEON_URL,
             pool_size=5,
             max_overflow=10,
             pool_timeout=30,
-            pool_recycle=1800,  # Recycle connections after 30 minutes
+            pool_recycle=1800,
+            pool_pre_ping=True,  # Test connections before using
             connect_args={
                 'connect_timeout': 10,
                 'keepalives': 1,
                 'keepalives_idle': 30,
                 'keepalives_interval': 10,
-                'keepalives_count': 5
+                'keepalives_count': 5,
+                'sslmode': 'require'
             }
         )
-        # Test connection
+        # Test connection with proper transaction handling
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+            # Use a transaction context manager
+            with conn.begin():
+                result = conn.execute(text("SELECT 1"))
+                result.fetchone()
         return engine
     except Exception as e:
         st.error(f"⚠️ Cloud Database connection failed: {e}")
@@ -275,26 +294,54 @@ engine = init_connection()
 # -------------------------
 
 def execute_query(query, params=None, commit=False):
-    """Execute a SQL query with parameters"""
+    """Execute a SQL query with parameters - with proper transaction handling"""
     if engine is None:
         st.error("Database connection not available")
         return None
     
     try:
         with engine.connect() as conn:
-            if params:
-                result = conn.execute(text(query), params)
-            else:
-                result = conn.execute(text(query))
-            
-            if commit:
-                conn.commit()
-                return True
-            else:
-                return result.fetchall() if result.returns_rows else None
+            # Use transaction context manager for proper commit/rollback
+            with conn.begin():
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                
+                if commit:
+                    # Transaction will auto-commit on successful block completion
+                    return True
+                else:
+                    # For SELECT queries, fetch results within the transaction
+                    if result.returns_rows:
+                        return result.fetchall()
+                    return None
     except Exception as e:
         st.error(f"Database error: {e}")
+        # Transaction will auto-rollback on exception
         return None
+
+def test_connection():
+    """Test database connection and return status"""
+    if engine is None:
+        return False, "No engine"
+    
+    try:
+        with engine.connect() as conn:
+            with conn.begin():
+                result = conn.execute(text("SELECT current_database(), current_user, version()"))
+                db_name, db_user, version = result.fetchone()
+                return True, f"Connected to: {db_name} as {db_user}"
+    except Exception as e:
+        return False, str(e)
+
+# Test connection and show in sidebar
+conn_status, conn_message = test_connection()
+with st.sidebar:
+    if conn_status:
+        st.success(f"✅ {conn_message}")
+    else:
+        st.error(f"❌ Connection failed: {conn_message}")
 
 # CRUD Operations for Water Sources
 def add_water_source(data):
@@ -460,7 +507,7 @@ def delete_rainfall_data(rainfall_id):
     return execute_query(query, {'rainfall_id': rainfall_id}, commit=True)
 
 # -------------------------
-# DATA LOADING FUNCTIONS
+# DATA LOADING FUNCTIONS (FIXED - SINGLE VERSION)
 # -------------------------
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -472,54 +519,71 @@ def load_all_data():
     
     try:
         with engine.connect() as conn:
-            # Get list of tables
-            query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-            tables_df = pd.read_sql(query, conn)
-            tables = tables_df['table_name'].tolist() if not tables_df.empty else []
-            
-            # Helper function to load table with error handling
-            def get_df(table_name):
-                if table_name in tables:
-                    try:
-                        return pd.read_sql(f"SELECT * FROM {table_name}", conn)
-                    except Exception as e:
-                        st.warning(f"Could not load {table_name}: {e}")
+            # Use transaction for reading data
+            with conn.begin():
+                # Get list of tables
+                query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+                tables_df = pd.read_sql(query, conn)
+                tables = tables_df['table_name'].tolist() if not tables_df.empty else []
+                
+                # Helper function to load table with error handling
+                def get_df(table_name):
+                    if table_name in tables:
+                        try:
+                            return pd.read_sql(f"SELECT * FROM {table_name}", conn)
+                        except Exception as e:
+                            st.warning(f"Could not load {table_name}: {e}")
+                            return pd.DataFrame()
+                    else:
                         return pd.DataFrame()
+                
+                # Load all tables
+                sources = get_df('water_sources')
+                stations = get_df('water_monitoring_stations')
+                groundwater = get_df('groundwater_levels')
+                rainfall = get_df('rainfall_history')
+                alerts = get_df('active_alerts')
+                regional = get_df('regional_stats')
+                water_quality = get_df('water_quality')
+                
+                # Water Usage with join
+                if 'water_usage_history' in tables and 'water_sources' in tables:
+                    usage_query = """
+                        SELECT wu.*, ws.source_name, ws.source_type, ws.state, ws.district 
+                        FROM water_usage_history wu
+                        LEFT JOIN water_sources ws ON wu.source_id = ws.source_id
+                    """
+                    try:
+                        usage = pd.read_sql(usage_query, conn)
+                    except Exception as e:
+                        st.warning(f"Could not load water usage: {e}")
+                        usage = pd.DataFrame()
                 else:
-                    return pd.DataFrame()
-            
-            # Load all tables
-            sources = get_df('water_sources')
-            stations = get_df('water_monitoring_stations')
-            groundwater = get_df('groundwater_levels')
-            rainfall = get_df('rainfall_history')
-            alerts = get_df('active_alerts')
-            regional = get_df('regional_stats')
-            water_quality = get_df('water_quality')
-            
-            # Water Usage with join
-            if 'water_usage_history' in tables and 'water_sources' in tables:
-                usage_query = """
-                    SELECT wu.*, ws.source_name, ws.source_type, ws.state, ws.district 
-                    FROM water_usage_history wu
-                    LEFT JOIN water_sources ws ON wu.source_id = ws.source_id
-                """
-                try:
-                    usage = pd.read_sql(usage_query, conn)
-                except:
                     usage = pd.DataFrame()
-            else:
-                usage = pd.DataFrame()
-            
-            return sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality
-            
+                
+                return sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality
+                
     except Exception as e:
         st.error(f"Error loading cloud data: {e}")
         return [pd.DataFrame()] * 8
 
-# Load the data
+# Load the data (call the function once)
 with st.spinner("🚀 Connecting to AQUASTAT Cloud Database..."):
     sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality = load_all_data()
+
+# Display loading summary in sidebar
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 📊 Data Summary")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Sources", len(sources))
+        st.metric("Stations", len(stations))
+    with col2:
+        st.metric("Groundwater", len(groundwater))
+        st.metric("Rainfall", len(rainfall))
+
+
 
 # -------------------------
 # DATA PROCESSING
