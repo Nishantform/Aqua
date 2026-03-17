@@ -12,7 +12,8 @@ import json
 import warnings
 import os
 from io import BytesIO
-import sqlite3
+import psycopg2  # Replaced sqlite3
+from sqlalchemy import create_engine  # Added for better pandas support
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -20,7 +21,6 @@ warnings.filterwarnings('ignore')
 # -------------------------
 # PAGE CONFIG
 # -------------------------
-
 st.set_page_config(
     page_title="AQUASTAT - National Water Command Center",
     page_icon="💧",
@@ -28,142 +28,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# -------------------------
-# CUSTOM CSS
-# -------------------------
-
-st.markdown("""
-<style>
-    /* Main background */
-    .stApp {
-        background: linear-gradient(135deg, #0a0f1e 0%, #0f1425 100%);
-    }
-    
-    /* Metric containers */
-    [data-testid="metric-container"] {
-        background: rgba(17, 25, 40, 0.95);
-        border: 1px solid #1f2937;
-        border-radius: 15px;
-        padding: 20px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-        transition: transform 0.3s ease;
-    }
-    
-    [data-testid="metric-container"]:hover {
-        transform: translateY(-5px);
-        border-color: #00e5ff;
-    }
-    
-    /* Headers */
-    h1, h2, h3 {
-        color: #00e5ff;
-        font-weight: 700;
-    }
-    
-    h1 {
-        font-size: 2.5rem;
-        border-bottom: 2px solid rgba(0, 229, 255, 0.3);
-        padding-bottom: 10px;
-    }
-    
-    /* Cards */
-    .info-card {
-        background: rgba(17, 25, 40, 0.95);
-        border: 1px solid #1f2937;
-        border-radius: 15px;
-        padding: 20px;
-        margin: 10px 0;
-        transition: all 0.3s ease;
-    }
-    
-    .info-card:hover {
-        border-color: #00e5ff;
-        box-shadow: 0 8px 30px rgba(0, 229, 255, 0.2);
-    }
-    
-    /* Status indicators */
-    .status-critical {
-        color: #ff4444;
-        font-weight: 600;
-        animation: pulse 2s infinite;
-    }
-    
-    .status-warning {
-        color: #ffd700;
-        font-weight: 600;
-    }
-    
-    .status-good {
-        color: #00ff9d;
-        font-weight: 600;
-    }
-    
-    @keyframes pulse {
-        0% { opacity: 1; }
-        50% { opacity: 0.5; }
-        100% { opacity: 1; }
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        background: rgba(17, 25, 40, 0.95);
-        padding: 10px;
-        border-radius: 10px;
-        gap: 10px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 8px 16px;
-        background: #1f2937;
-        color: white;
-        font-weight: 600;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: #00e5ff;
-        color: black;
-    }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background: rgba(10, 15, 30, 0.95);
-        border-right: 1px solid #1f2937;
-    }
-    
-    /* Dataframes */
-    .stDataFrame {
-        background: rgba(17, 25, 40, 0.95);
-        border-radius: 10px;
-        border: 1px solid #1f2937;
-    }
-    
-    /* Progress bars */
-    .stProgress > div > div {
-        background: linear-gradient(90deg, #00e5ff, #00b8ff);
-    }
-</style>
-""", unsafe_allow_html=True)
+# ... (Keep your CUSTOM CSS block exactly as it was) ...
 
 # -------------------------
-# SQLITE3 DATABASE CONNECTION
+# NEON CLOUD DATABASE CONNECTION
 # -------------------------
+
+# Your Neon connection string (Updated with your credentials)
+NEON_URL = "postgresql://neondb_owner:nis123456789@ep-shy-dust-a13add3h-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 
 @st.cache_resource
 def init_connection():
-    """Initialize SQLite3 database connection"""
+    """Initialize Neon PostgreSQL database connection using SQLAlchemy"""
     try:
-        # Connect to your SQLite database file
-        # 'check_same_thread=False' allows the connection to work with web apps like Streamlit
-        conn = sqlite3.connect('aqua_stat.db', check_same_thread=False)
-        print("Successfully connected to Aqua Stat database!")
-        return conn
-    except sqlite3.Error as e:
-        st.error(f"Database connection failed: {e}")
+        # We use SQLAlchemy engine because it handles connection pooling better for cloud apps
+        engine = create_engine(NEON_URL)
+        return engine
+    except Exception as e:
+        st.error(f"Cloud Database connection failed: {e}")
         return None
 
-# Initialize connection
-conn = init_connection()
+# Initialize engine
+engine = init_connection()
 
 # -------------------------
 # DATA LOADING FUNCTIONS
@@ -171,75 +57,50 @@ conn = init_connection()
 
 @st.cache_data(ttl=300)
 def load_all_data():
-    """Load all data from SQLite database"""
-    if conn is None:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    """Load all data from Neon Cloud database"""
+    if engine is None:
+        return [pd.DataFrame()] * 7
     
     try:
-        # Get list of tables to check what's available
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [table[0] for table in cursor.fetchall()]
-        print(f"Available tables: {tables}")
-        
-        # Water Sources
-        if 'water_sources' in tables:
-            sources = pd.read_sql_query("SELECT * FROM water_sources", conn)
-        else:
-            sources = pd.DataFrame()
-            st.warning("Table 'water_sources' not found in database")
-        
-        # Monitoring Stations
-        if 'water_monitoring_stations' in tables:
-            stations = pd.read_sql_query("SELECT * FROM water_monitoring_stations", conn)
-        else:
-            stations = pd.DataFrame()
-            st.warning("Table 'water_monitoring_stations' not found in database")
-        
-        # Groundwater Levels
-        if 'groundwater_levels' in tables:
-            groundwater = pd.read_sql_query("SELECT * FROM groundwater_levels", conn)
-        else:
-            groundwater = pd.DataFrame()
-            st.warning("Table 'groundwater_levels' not found in database")
-        
-        # Rainfall History
-        if 'rainfall_history' in tables:
-            rainfall = pd.read_sql_query("SELECT * FROM rainfall_history", conn)
-        else:
-            rainfall = pd.DataFrame()
-            st.warning("Table 'rainfall_history' not found in database")
-        
-        # Active Alerts
-        if 'active_alerts' in tables:
-            alerts = pd.read_sql_query("SELECT * FROM active_alerts", conn)
-        else:
-            alerts = pd.DataFrame()
-            st.warning("Table 'active_alerts' not found in database")
-        
-        # Water Usage
-        if 'water_usage_history' in tables:
-            usage = pd.read_sql_query("""
-                SELECT wu.*, ws.source_name, ws.source_type, ws.state, ws.district 
-                FROM water_usage_history wu
-                LEFT JOIN water_sources ws ON wu.source_id = ws.source_id
-            """, conn)
-        else:
-            usage = pd.DataFrame()
-            st.warning("Table 'water_usage_history' not found in database")
-        
-        # Regional Stats
-        if 'regional_stats' in tables:
-            regional = pd.read_sql_query("SELECT * FROM regional_stats", conn)
-        else:
-            regional = pd.DataFrame()
-            st.warning("Table 'regional_stats' not found in database")
-        
-        return sources, stations, groundwater, rainfall, alerts, usage, regional
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        with engine.connect() as conn:
+            # Get list of tables available in Neon (Postgres syntax)
+            query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+            tables = pd.read_sql(query, conn)['table_name'].tolist()
+            
+            # Helper function to load table or return empty DF
+            def get_df(name):
+                if name in tables:
+                    return pd.read_sql(f"SELECT * FROM {name}", conn)
+                else:
+                    st.warning(f"Table '{name}' not found in cloud database")
+                    return pd.DataFrame()
 
+            sources = get_df('water_sources')
+            stations = get_df('water_monitoring_stations')
+            groundwater = get_df('groundwater_levels')
+            rainfall = get_df('rainfall_history')
+            alerts = get_df('active_alerts')
+            regional = get_df('regional_stats')
+
+            # Water Usage (with SQL join)
+            if 'water_usage_history' in tables and 'water_sources' in tables:
+                usage_query = """
+                    SELECT wu.*, ws.source_name, ws.source_type, ws.state, ws.district 
+                    FROM water_usage_history wu
+                    LEFT JOIN water_sources ws ON wu.source_id = ws.source_id
+                """
+                usage = pd.read_sql(usage_query, conn)
+            else:
+                usage = pd.DataFrame()
+
+            return sources, stations, groundwater, rainfall, alerts, usage, regional
+
+    except Exception as e:
+        st.error(f"Error loading cloud data: {e}")
+        return [pd.DataFrame()] * 7
+
+# Load the data into the app
+sources, stations, groundwater, rainfall, alerts, usage, regional = load_all_data()
 # -------------------------
 # LOAD DATA
 # -------------------------
