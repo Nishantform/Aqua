@@ -34,8 +34,8 @@ st.set_page_config(
 # NEON CLOUD DATABASE CONNECTION
 # -------------------------
 
-# Your Neon connection string (Updated with your credentials)
-NEON_URL = "postgresql://neondb_owner:nis123456789@ep-shy-dust-a13add3h-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
+# Secure way to load the URL
+NEON_URL = st.secrets["NEON_URL"]
 
 @st.cache_resource
 def init_connection():
