@@ -506,8 +506,8 @@ def delete_rainfall_data(rainfall_id):
     query = "DELETE FROM rainfall_history WHERE id = :rainfall_id"
     return execute_query(query, {'rainfall_id': rainfall_id}, commit=True)
 
-# -------------------------
-# DATA LOADING FUNCTIONS (FIXED - SINGLE VERSION)
+# ----# -------------------------
+# DATA LOADING FUNCTIONS (FIXED - NEON SYNC VERSION)
 # -------------------------
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -530,21 +530,24 @@ def load_all_data():
                 def get_df(table_name):
                     if table_name in tables:
                         try:
-                            return pd.read_sql(f"SELECT * FROM {table_name}", conn)
+                            return pd.read_sql(f'SELECT * FROM "{table_name}"', conn)
                         except Exception as e:
                             st.warning(f"Could not load {table_name}: {e}")
                             return pd.DataFrame()
                     else:
                         return pd.DataFrame()
                 
-                # Load all tables
+                # Load existing tables
                 sources = get_df('water_sources')
                 stations = get_df('water_monitoring_stations')
                 groundwater = get_df('groundwater_levels')
                 rainfall = get_df('rainfall_history')
                 alerts = get_df('active_alerts')
                 regional = get_df('regional_stats')
-                water_quality = get_df('water_quality')
+                
+                # FIX: Since 'water_quality' table doesn't exist, we use 'stations' data
+                # as the source for the Water Quality tab.
+                water_quality = stations.copy() if not stations.empty else pd.DataFrame()
                 
                 # Water Usage with join
                 if 'water_usage_history' in tables and 'water_sources' in tables:
@@ -564,6 +567,7 @@ def load_all_data():
                 return sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality
                 
     except Exception as e:
+        # Critical: Rollback happens automatically here due to the context manager
         st.error(f"Error loading cloud data: {e}")
         return [pd.DataFrame()] * 8
 
@@ -571,7 +575,7 @@ def load_all_data():
 with st.spinner("🚀 Connecting to AQUASTAT Cloud Database..."):
     sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality = load_all_data()
 
-# Display loading summary in sidebar
+# --- Sidebar Summary ---
 with st.sidebar:
     st.markdown("---")
     st.markdown("### 📊 Data Summary")
