@@ -1477,19 +1477,35 @@ with tab4:
                 fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig, use_container_width=True)
         
-        # Water Quality Table
-        st.markdown("### Recent Water Quality Readings")
-        display_cols = ['station_name', 'measurement_date', 'ph_level', 'dissolved_oxygen', 'turbidity', 'tds', 'temperature']
-        display_cols = [col for col in display_cols if col in water_quality.columns]
-        
-        if display_cols:
-            st.dataframe(
-                water_quality[display_cols].sort_values('measurement_date', ascending=False).head(50),
-                use_container_width=True,
-                hide_index=True
-            )
-    else:
-        st.info("No water quality data available")
+         # --- Corrected Water Quality Table ---
+st.markdown("### Recent Water Quality Readings")
+
+# Updated these names to match your Neon database exactly
+display_cols = [
+    'station_name', 
+    'district_name', 
+    'ph_level', 
+    'dissolved_oxygen_mg_l', 
+    'turbidity_ntu', 
+    'status'
+]
+
+# Safety check: only use columns that actually exist in your dataframe
+available_cols = [col for col in display_cols if col in water_quality.columns]
+
+if not water_quality.empty and available_cols:
+    # We remove sort_values('measurement_date') because that column doesn't exist in your Neon table yet
+    st.dataframe(
+        water_quality[available_cols].head(50),
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # Optional: Add a success message to show data is live
+    st.caption(f"Showing {len(water_quality.head(50))} live readings from Neon Cloud.")
+else:
+    st.info("No water quality data available. Please check if 'water_monitoring_stations' table is loaded.")
+
 
 # =====================
 # TAB 5: ALERTS (Same as before)
