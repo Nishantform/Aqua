@@ -54,7 +54,6 @@ st.markdown("""
 # NEON CLOUD DATABASE CONNECTION
 # -------------------------
 
-# Try to get NEON_URL from secrets
 try:
     NEON_URL = st.secrets["NEON_URL"]
 except:
@@ -193,7 +192,7 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
     
-    # Time Filters - Year Range with Number Input (with error handling)
+    # ========== TIME FILTERS - Year Range with Number Input ==========
     st.markdown("### 📅 Time Filters")
     if not sources.empty and 'build_year' in sources.columns:
         build_years = sources['build_year'].dropna()
@@ -216,7 +215,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Geographic Filters
+    # ========== GEOGRAPHIC FILTERS ==========
     st.markdown("### 🌍 Geographic Filters")
     selected_state = "All States"
     if not sources.empty and 'state' in sources.columns:
@@ -234,7 +233,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Source Filters
+    # ========== SOURCE FILTERS ==========
     st.markdown("### 💧 Source Filters")
     selected_type = "All Types"
     if not sources.empty and 'source_type' in sources.columns:
@@ -256,7 +255,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Rainfall Filters
+    # ========== RAINFALL FILTERS ==========
     st.markdown("### ☔ Rainfall Filters")
     selected_rainfall_district = "All Districts"
     if not rainfall.empty and 'district_name' in rainfall.columns:
@@ -289,7 +288,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Water Quality Filters
+    # ========== WATER QUALITY FILTERS ==========
     st.markdown("### 💧 Water Quality Filters")
     selected_ph_min = 0.0
     selected_ph_max = 14.0
@@ -326,6 +325,8 @@ with st.sidebar:
         selected_station_status = st.selectbox("Station Status", status_opts, key="station_status_filter")
     
     st.markdown("---")
+    
+    # ========== MAP SETTINGS ==========
     st.markdown("### 🗺️ Map Settings")
     map_style = st.selectbox("Map Style", ["Esri Satellite", "OpenStreetMap", "CartoDB Dark", "CartoDB Light"], index=0)
     show_heatmap = st.checkbox("Show Heatmap", True)
@@ -387,7 +388,8 @@ st.title("💧 AQUASTAT National Water Command Center")
 st.caption(f"**Live Intelligence** • Last Updated: {current_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
 
 col1, col2, col3, col4, col5 = st.columns(5)
-with col1: st.markdown(f'<div class="metric-card"><h3 style="color:#8892b0;">Total Sources</h3><h1 style="color:#00e5ff;">{len(sources):,}</h1><p>{len(sources)-len(filtered_sources)} filtered</p></div>', unsafe_allow_html=True)
+with col1: 
+    st.markdown(f'<div class="metric-card"><h3 style="color:#8892b0;">Total Sources</h3><h1 style="color:#00e5ff;">{len(sources):,}</h1><p>{len(sources)-len(filtered_sources)} filtered</p></div>', unsafe_allow_html=True)
 with col2: 
     avg_cap = filtered_sources['capacity_percent'].mean() if not filtered_sources.empty else 0
     st.markdown(f'<div class="metric-card"><h3 style="color:#8892b0;">Avg Capacity</h3><h1 style="color:#00e5ff;">{avg_cap:.1f}%</h1></div>', unsafe_allow_html=True)
@@ -505,7 +507,7 @@ with tab2:
             risk_text = "CRITICAL" if cap < 30 else ("MODERATE" if cap < 60 else "GOOD")
             heat_data.append([source['latitude'], source['longitude']])
             sources_on_map += 1
-            popup_html = f'<div style="font-family:Arial;min-width:250px;background:#0a192f;color:#e6f1ff;"><h4 style="color:{color};">{source.get("source_name","Unknown")}</h4><hr>\\n<table style="width:100%;">\\n<tr><td><b>Type:</b></td><td>{source.get("source_type","Unknown")}</td></tr>\\n<tr><td><b>Location:</b></td><td>{source.get("district","Unknown")}, {source.get("state","Unknown")}</td></tr>\\n<tr><td><b>Capacity:</b></td><td>{cap:.1f}%</td></tr>\\n<tr><td><b>Age:</b></td><td>{source.get("age",0):.0f} yrs</td></tr>\\n<tr><td><b>Risk:</b></td><td><span style="color:{color};">{risk_text}</span></td></tr>\\n</table></div>'
+            popup_html = f'<div style="font-family:Arial;min-width:250px;background:#0a192f;color:#e6f1ff;"><h4 style="color:{color};">{source.get("source_name","Unknown")}</h4><hr><table style="width:100%;">\\n<tr><td><b>Type:</b></td><td>{source.get("source_type","Unknown")}</td></tr>\\n<tr><td><b>Location:</b></td><td>{source.get("district","Unknown")}, {source.get("state","Unknown")}</td></tr>\\n<tr><td><b>Capacity:</b></td><td>{cap:.1f}%</td></tr>\\n<tr><td><b>Age:</b></td><td>{source.get("age",0):.0f} yrs</td></tr>\\n<tr><td><b>Risk:</b></td><td><span style="color:{color};">{risk_text}</span></td></tr>\\n</table></div>'
             marker = folium.CircleMarker(location=[source['latitude'], source['longitude']], radius=marker_size + (3 if cap < 30 else 0), color=color, fill=True, fillOpacity=0.7, popup=folium.Popup(popup_html, max_width=300), tooltip=f"{source.get('source_name')} - {cap:.0f}%")
             marker.add_to(mc)
         if show_heatmap and heat_data:
@@ -535,6 +537,7 @@ with tab2:
 with tab3:
     st.markdown('<p class="section-header">📈 Advanced Analytics</p>', unsafe_allow_html=True)
     atab1, atab2, atab3 = st.tabs(["📊 Trends", "📉 Comparisons", "📐 Statistics"])
+    
     with atab1:
         col1, col2 = st.columns(2)
         with col1:
@@ -559,6 +562,7 @@ with tab3:
                         fig.update_traces(line_color='#ffd700', line_width=3)
                         fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                         st.plotly_chart(fig, use_container_width=True)
+    
     with atab2:
         col1, col2 = st.columns(2)
         with col1:
@@ -580,6 +584,7 @@ with tab3:
                     fig = px.scatter(filtered_gw, x='recharge_rate_mcm', y='extraction_pct', size='avg_depth_meters' if 'avg_depth_meters' in filtered_gw.columns else None, color='district_name' if 'district_name' in filtered_gw.columns else None, title="Groundwater Extraction vs Recharge", template="plotly_dark")
                     fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                     st.plotly_chart(fig, use_container_width=True)
+    
     with atab3:
         col1, col2 = st.columns(2)
         with col1:
