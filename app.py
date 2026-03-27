@@ -54,10 +54,16 @@ st.markdown("""
 # NEON CLOUD DATABASE CONNECTION
 # -------------------------
 
-NEON_URL = st.secrets["NEON_URL"]
+# Try to get NEON_URL from secrets
+try:
+    NEON_URL = st.secrets["NEON_URL"]
+except:
+    NEON_URL = None
 
 @st.cache_resource
 def init_connection():
+    if NEON_URL is None:
+        return None
     try:
         engine = create_engine(
             NEON_URL,
@@ -111,7 +117,10 @@ def load_all_data():
                 regional = get_df('regional_stats')
                 
                 if 'water_usage_history' in tables and 'water_sources' in tables:
-                    usage = pd.read_sql("""SELECT wu.*, ws.source_name, ws.source_type, ws.state, ws.district FROM water_usage_history wu LEFT JOIN water_sources ws ON wu.source_id = ws.source_id""", conn)
+                    try:
+                        usage = pd.read_sql("""SELECT wu.*, ws.source_name, ws.source_type, ws.state, ws.district FROM water_usage_history wu LEFT JOIN water_sources ws ON wu.source_id = ws.source_id""", conn)
+                    except:
+                        usage = pd.DataFrame()
                 else:
                     usage = pd.DataFrame()
                 
@@ -171,7 +180,12 @@ if not sources.empty and not stations.empty:
 with st.sidebar:
     st.title("🎮 AQUASTAT")
     st.caption("Command Interface v3.0")
-    st.markdown(f'<span class="user-badge">👤 VIEWER ACCESS</span>', unsafe_allow_html=True) if engine is not None else st.error("❌ Cloud Disconnected")
+    
+    if engine is not None:
+        st.markdown('<span class="user-badge">👤 VIEWER ACCESS</span>', unsafe_allow_html=True)
+    else:
+        st.error("❌ Cloud Disconnected")
+    
     st.markdown("---")
     
     if st.button("🔄 Reset All Filters", use_container_width=True):
@@ -179,19 +193,26 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
     
-    # Time Filters - Year Range with Number Input
+    # Time Filters - Year Range with Number Input (with error handling)
     st.markdown("### 📅 Time Filters")
     if not sources.empty and 'build_year' in sources.columns:
-        min_year = int(sources['build_year'].min()) if not sources['build_year'].isna().all() else 1800
-        max_year = int(sources['build_year'].max()) if not sources['build_year'].isna().all() else 2026
-        col1, col2 = st.columns(2)
-        with col1:
-            year_from = st.number_input("From Year", min_value=1800, max_value=2026, value=min_year)
-        with col2:
-            year_to = st.number_input("To Year", min_value=1800, max_value=2026, value=max_year)
-        year_range = (year_from, year_to)
+        build_years = sources['build_year'].dropna()
+        if not build_years.empty:
+            min_year = int(build_years.min())
+            max_year = int(build_years.max())
+        else:
+            min_year = 1800
+            max_year = 2026
     else:
-        year_range = (1800, 2026)
+        min_year = 1800
+        max_year = 2026
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        year_from = st.number_input("From Year", min_value=1800, max_value=2026, value=min_year, step=1)
+    with col2:
+        year_to = st.number_input("To Year", min_value=1800, max_value=2026, value=max_year, step=1)
+    year_range = (year_from, year_to)
     
     st.markdown("---")
     
@@ -208,8 +229,8 @@ with st.sidebar:
             districts = sources[sources['state'] == selected_state]['district'].dropna().unique()
         else:
             districts = sources['district'].dropna().unique()
-        districts = ['All Districts'] + sorted(districts.tolist()) if len(districts) > 0 else ['All Districts']
-        selected_district = st.selectbox("District", districts)
+        districts_list = ['All Districts'] + sorted(districts.tolist()) if len(districts) > 0 else ['All Districts']
+        selected_district = st.selectbox("District", districts_list)
     
     st.markdown("---")
     
@@ -222,8 +243,11 @@ with st.sidebar:
     
     capacity_range = (0, 100)
     if not sources.empty and 'capacity_percent' in sources.columns:
-        min_cap, max_cap = float(sources['capacity_percent'].min()), float(sources['capacity_percent'].max())
-        capacity_range = st.slider("Capacity %", min_value=min_cap, max_value=max_cap, value=(min_cap, max_cap))
+        cap_vals = sources['capacity_percent'].dropna()
+        if not cap_vals.empty:
+            min_cap = float(cap_vals.min())
+            max_cap = float(cap_vals.max())
+            capacity_range = st.slider("Capacity %", min_value=min_cap, max_value=max_cap, value=(min_cap, max_cap))
     
     selected_risk = "All Risk Levels"
     if not sources.empty and 'risk_level' in sources.columns:
@@ -232,7 +256,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Rainfall Filters (New)
+    # Rainfall Filters
     st.markdown("### ☔ Rainfall Filters")
     selected_rainfall_district = "All Districts"
     if not rainfall.empty and 'district_name' in rainfall.columns:
@@ -240,16 +264,23 @@ with st.sidebar:
         selected_rainfall_district = st.selectbox("Rainfall District", rain_districts, key="rainfall_district_filter")
     
     if not rainfall.empty and 'record_year' in rainfall.columns:
-        rain_min_year = int(rainfall['record_year'].min()) if not rainfall['record_year'].isna().all() else 2000
-        rain_max_year = int(rainfall['record_year'].max()) if not rainfall['record_year'].isna().all() else 2026
-        col1, col2 = st.columns(2)
-        with col1:
-            rain_year_from = st.number_input("Rainfall From", min_value=1900, max_value=2026, value=rain_min_year, key="rain_from")
-        with col2:
-            rain_year_to = st.number_input("Rainfall To", min_value=1900, max_value=2026, value=rain_max_year, key="rain_to")
-        rain_year_range = (rain_year_from, rain_year_to)
+        rain_years = rainfall['record_year'].dropna()
+        if not rain_years.empty:
+            rain_min_year = int(rain_years.min())
+            rain_max_year = int(rain_years.max())
+        else:
+            rain_min_year = 2000
+            rain_max_year = 2026
     else:
-        rain_year_range = (2000, 2026)
+        rain_min_year = 2000
+        rain_max_year = 2026
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        rain_year_from = st.number_input("Rainfall From", min_value=1900, max_value=2026, value=rain_min_year, key="rain_from")
+    with col2:
+        rain_year_to = st.number_input("Rainfall To", min_value=1900, max_value=2026, value=rain_max_year, key="rain_to")
+    rain_year_range = (rain_year_from, rain_year_to)
     
     selected_rainfall_category = "All Categories"
     if not rainfall.empty and 'rainfall_category' in rainfall.columns:
@@ -258,21 +289,31 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Water Quality Filters (New)
+    # Water Quality Filters
     st.markdown("### 💧 Water Quality Filters")
     selected_ph_min = 0.0
     selected_ph_max = 14.0
     selected_do_min = 0.0
     selected_do_max = 20.0
+    
     if not stations.empty and 'ph_level' in stations.columns:
-        ph_min, ph_max = float(stations['ph_level'].min()), float(stations['ph_level'].max())
+        ph_vals = stations['ph_level'].dropna()
+        if not ph_vals.empty:
+            ph_min, ph_max = float(ph_vals.min()), float(ph_vals.max())
+        else:
+            ph_min, ph_max = 0.0, 14.0
         col1, col2 = st.columns(2)
         with col1:
             selected_ph_min = st.number_input("Min pH", min_value=0.0, max_value=14.0, value=ph_min, format="%.1f", key="ph_min")
         with col2:
             selected_ph_max = st.number_input("Max pH", min_value=0.0, max_value=14.0, value=ph_max, format="%.1f", key="ph_max")
+    
     if not stations.empty and 'dissolved_oxygen_mg_l' in stations.columns:
-        do_min, do_max = float(stations['dissolved_oxygen_mg_l'].min()), float(stations['dissolved_oxygen_mg_l'].max())
+        do_vals = stations['dissolved_oxygen_mg_l'].dropna()
+        if not do_vals.empty:
+            do_min, do_max = float(do_vals.min()), float(do_vals.max())
+        else:
+            do_min, do_max = 0.0, 20.0
         col1, col2 = st.columns(2)
         with col1:
             selected_do_min = st.number_input("Min DO (mg/L)", min_value=0.0, max_value=20.0, value=do_min, format="%.1f", key="do_min")
@@ -437,7 +478,10 @@ with tab1:
 # ===================== TAB 2: MAP VIEW =====================
 with tab2:
     st.markdown('<p class="section-header">🗺️ National Interactive Water Resources Map</p>', unsafe_allow_html=True)
-    filter_info = [f"State: {selected_state}", f"District: {selected_district}", f"Type: {selected_type}"] if selected_state != "All States" or selected_district != "All Districts" or selected_type != "All Types" else []
+    filter_info = []
+    if selected_state != "All States": filter_info.append(f"State: {selected_state}")
+    if selected_district != "All Districts": filter_info.append(f"District: {selected_district}")
+    if selected_type != "All Types": filter_info.append(f"Type: {selected_type}")
     if filter_info: st.info(f"**Showing:** {', '.join(filter_info)} | **Total Sources:** {len(filtered_sources)}")
     
     style_map = {"Esri Satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "OpenStreetMap": "OpenStreetMap", "CartoDB Dark": "CartoDB dark_matter", "CartoDB Light": "CartoDB positron"}
@@ -461,7 +505,7 @@ with tab2:
             risk_text = "CRITICAL" if cap < 30 else ("MODERATE" if cap < 60 else "GOOD")
             heat_data.append([source['latitude'], source['longitude']])
             sources_on_map += 1
-            popup_html = f'<div style="font-family:Arial;min-width:250px;background:#0a192f;color:#e6f1ff;"><h4 style="color:{color};">{source.get("source_name","Unknown")}</h4><hr><table> <tr><td><b>Type:</b></td><td>{source.get("source_type","Unknown")}</td></tr><tr><td><b>Location:</b></td><td>{source.get("district","Unknown")}, {source.get("state","Unknown")}</td></tr><tr><td><b>Capacity:</b></td><td>{cap:.1f}%</td></tr><tr><td><b>Age:</b></td><td>{source.get("age",0):.0f} yrs</td></tr><tr><td><b>Risk:</b></td><td><span style="color:{color};">{risk_text}</span></td></tr></table></div>'
+            popup_html = f'<div style="font-family:Arial;min-width:250px;background:#0a192f;color:#e6f1ff;"><h4 style="color:{color};">{source.get("source_name","Unknown")}</h4><hr>\\n<table style="width:100%;">\\n<tr><td><b>Type:</b></td><td>{source.get("source_type","Unknown")}</td></tr>\\n<tr><td><b>Location:</b></td><td>{source.get("district","Unknown")}, {source.get("state","Unknown")}</td></tr>\\n<tr><td><b>Capacity:</b></td><td>{cap:.1f}%</td></tr>\\n<tr><td><b>Age:</b></td><td>{source.get("age",0):.0f} yrs</td></tr>\\n<tr><td><b>Risk:</b></td><td><span style="color:{color};">{risk_text}</span></td></tr>\\n</table></div>'
             marker = folium.CircleMarker(location=[source['latitude'], source['longitude']], radius=marker_size + (3 if cap < 30 else 0), color=color, fill=True, fillOpacity=0.7, popup=folium.Popup(popup_html, max_width=300), tooltip=f"{source.get('source_name')} - {cap:.0f}%")
             marker.add_to(mc)
         if show_heatmap and heat_data:
@@ -481,8 +525,11 @@ with tab2:
     with col3: st.metric("Coordinate Coverage", f"{(sources_on_map/len(filtered_sources)*100) if len(filtered_sources)>0 else 0:.1f}%")
     st.markdown("---")
     cols = st.columns(5)
-    for i, (label, color) in enumerate([("Good (≥60%)", "status-good"), ("Moderate (30-60%)", "status-warning"), ("Critical (<30%)", "status-critical"), ("Monitoring Station", "#4287f5"), ("Heatmap Area", "")]):
-        with cols[i]: st.markdown(f'<span class="status-dot {"status-critical" if i==2 else ("status-warning" if i==1 else ("status-good" if i==0 else ""))}" style="background:{color if i==3 else ''};"></span> {label}', unsafe_allow_html=True) if i<3 else st.markdown(f'<span class="status-dot" style="background:{color};"></span> {label}', unsafe_allow_html=True)
+    with cols[0]: st.markdown('<span class="status-dot status-good"></span> Good (≥60%)', unsafe_allow_html=True)
+    with cols[1]: st.markdown('<span class="status-dot status-warning"></span> Moderate (30-60%)', unsafe_allow_html=True)
+    with cols[2]: st.markdown('<span class="status-dot status-critical"></span> Critical (<30%)', unsafe_allow_html=True)
+    with cols[3]: st.markdown('<span class="status-dot" style="background:#4287f5;"></span> Monitoring Station', unsafe_allow_html=True)
+    with cols[4]: st.markdown('🔥 Heatmap Area', unsafe_allow_html=True)
 
 # ===================== TAB 3: ANALYTICS =====================
 with tab3:
@@ -494,10 +541,11 @@ with tab3:
             st.subheader("Rainfall Trend")
             if not filtered_rainfall.empty:
                 rain_trend = filtered_rainfall.groupby('record_year')['rainfall_cm'].mean().reset_index()
-                fig = px.line(rain_trend, x='record_year', y='rainfall_cm', title="Average Rainfall Over Years", template="plotly_dark", markers=True)
-                fig.update_traces(line_color='#00e5ff', line_width=3)
-                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig, use_container_width=True)
+                if not rain_trend.empty:
+                    fig = px.line(rain_trend, x='record_year', y='rainfall_cm', title="Average Rainfall Over Years", template="plotly_dark", markers=True)
+                    fig.update_traces(line_color='#00e5ff', line_width=3)
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
         with col2:
             st.subheader("Groundwater Trend")
             if not groundwater.empty and 'assessment_year' in groundwater.columns:
@@ -506,10 +554,11 @@ with tab3:
                     filtered_gw = filtered_gw[filtered_gw['district_name'] == selected_district]
                 if not filtered_gw.empty:
                     gw_trend = filtered_gw.groupby('assessment_year')['avg_depth_meters'].mean().reset_index()
-                    fig = px.line(gw_trend, x='assessment_year', y='avg_depth_meters', title="Average Groundwater Depth", template="plotly_dark", markers=True)
-                    fig.update_traces(line_color='#ffd700', line_width=3)
-                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig, use_container_width=True)
+                    if not gw_trend.empty:
+                        fig = px.line(gw_trend, x='assessment_year', y='avg_depth_meters', title="Average Groundwater Depth", template="plotly_dark", markers=True)
+                        fig.update_traces(line_color='#ffd700', line_width=3)
+                        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                        st.plotly_chart(fig, use_container_width=True)
     with atab2:
         col1, col2 = st.columns(2)
         with col1:
@@ -557,10 +606,8 @@ with tab4:
     st.markdown('<p class="section-header">💧 Water Quality Monitoring</p>', unsafe_allow_html=True)
     
     if not filtered_stations.empty:
-        # Filter Info Display
         st.info(f"**Showing:** {len(filtered_stations)} stations | pH: {selected_ph_min:.1f}-{selected_ph_max:.1f} | DO: {selected_do_min:.1f}-{selected_do_max:.1f} mg/L | Status: {selected_station_status}")
         
-        # Metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             avg_ph = filtered_stations['ph_level'].mean() if 'ph_level' in filtered_stations.columns else 0
@@ -577,7 +624,6 @@ with tab4:
         
         st.markdown("---")
         
-        # Graphs
         col1, col2 = st.columns(2)
         with col1:
             if 'ph_level' in filtered_stations.columns:
@@ -592,7 +638,6 @@ with tab4:
                 fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig, use_container_width=True)
         
-        # Data Table
         st.markdown("### 📋 Water Quality Readings")
         display_cols = ['station_name', 'district_name', 'ph_level', 'dissolved_oxygen_mg_l', 'turbidity_ntu', 'status']
         available_cols = [c for c in display_cols if c in filtered_stations.columns]
@@ -614,14 +659,12 @@ with tab5:
     st.markdown('<p class="section-header">🚨 Active Alerts and Warnings</p>', unsafe_allow_html=True)
     
     if not alerts.empty:
-        # Merge with sources for location info
         if not sources.empty and 'source_name' in sources.columns:
             alerts = alerts.merge(sources[['source_name', 'source_type', 'district', 'state']], on='source_name', how='left')
             for col in ['source_type', 'district', 'state']:
                 if col in alerts.columns:
                     alerts[col] = alerts[col].fillna('Unknown')
         
-        # Filter alerts based on selected filters
         filtered_alerts = alerts.copy()
         if selected_state != "All States" and 'state' in filtered_alerts.columns:
             filtered_alerts = filtered_alerts[filtered_alerts['state'] == selected_state]
@@ -630,7 +673,6 @@ with tab5:
         if selected_type != "All Types" and 'source_type' in filtered_alerts.columns:
             filtered_alerts = filtered_alerts[filtered_alerts['source_type'] == selected_type]
         
-        # Count by status
         critical_alerts = filtered_alerts[filtered_alerts['alert_status'] == 'CRITICAL'] if 'alert_status' in filtered_alerts.columns else pd.DataFrame()
         warning_alerts = filtered_alerts[filtered_alerts['alert_status'] == 'WARNING'] if 'alert_status' in filtered_alerts.columns else pd.DataFrame()
         stable_alerts = filtered_alerts[filtered_alerts['alert_status'] == 'STABLE'] if 'alert_status' in filtered_alerts.columns else pd.DataFrame()
@@ -645,7 +687,6 @@ with tab5:
         if filtered_alerts.empty:
             st.success("✅ No alerts match the current filters")
         else:
-            # Sort alerts: CRITICAL first, then WARNING, then STABLE
             severity_order = {'CRITICAL': 0, 'WARNING': 1, 'STABLE': 2}
             filtered_alerts['severity'] = filtered_alerts['alert_status'].map(severity_order)
             filtered_alerts = filtered_alerts.sort_values('severity').drop('severity', axis=1)
@@ -653,11 +694,11 @@ with tab5:
             for _, alert in filtered_alerts.iterrows():
                 alert_status = alert.get('alert_status', 'STABLE')
                 if alert_status == 'CRITICAL':
-                    status_class, status_emoji, border_color = "alert-critical", "🔴", "#ff4444"
+                    status_emoji, border_color = "🔴", "#ff4444"
                 elif alert_status == 'WARNING':
-                    status_class, status_emoji, border_color = "alert-warning", "🟡", "#ffd700"
+                    status_emoji, border_color = "🟡", "#ffd700"
                 else:
-                    status_class, status_emoji, border_color = "alert-good", "🟢", "#00ff9d"
+                    status_emoji, border_color = "🟢", "#00ff9d"
                 
                 source_name = alert.get('source_name', 'Unknown')
                 source_type = alert.get('source_type', 'Unknown')
@@ -668,20 +709,17 @@ with tab5:
                 if isinstance(alert_time, pd.Timestamp):
                     alert_time = alert_time.strftime('%Y-%m-%d %H:%M:%S')
                 
-                # Auto-generate reason if not present
-                reason = alert.get('alert_reason', '')
-                if not reason or pd.isna(reason):
-                    reasons = []
-                    if capacity < 30:
-                        reasons.append(f"Critical capacity: {capacity}%")
-                    elif capacity < 60:
-                        reasons.append(f"Low capacity: {capacity}%")
-                    if ph != 'N/A' and pd.notna(ph):
-                        if ph < 6.5:
-                            reasons.append(f"pH too low: {ph}")
-                        elif ph > 8.5:
-                            reasons.append(f"pH too high: {ph}")
-                    reason = " | ".join(reasons) if reasons else "Monitoring alert - Routine check"
+                reasons = []
+                if capacity < 30:
+                    reasons.append(f"Critical capacity: {capacity}%")
+                elif capacity < 60:
+                    reasons.append(f"Low capacity: {capacity}%")
+                if ph != 'N/A' and pd.notna(ph):
+                    if ph < 6.5:
+                        reasons.append(f"pH too low: {ph}")
+                    elif ph > 8.5:
+                        reasons.append(f"pH too high: {ph}")
+                reason = " | ".join(reasons) if reasons else "Monitoring alert - Routine check"
                 
                 with st.expander(f"{status_emoji} {source_name} - {alert_status}", expanded=(alert_status == 'CRITICAL')):
                     col1, col2 = st.columns(2)
