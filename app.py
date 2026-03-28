@@ -195,26 +195,30 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
     
-    # ========== TIME FILTERS - BUILD YEAR RANGE ==========
+    # ========== TIME FILTERS - BUILD YEAR RANGE (FIXED) ==========
     st.markdown("### 📅 Build Year Filters")
+    
+    # SAFE DEFAULT VALUES - handle empty data case
+    default_min_year = 1800
+    default_max_year = 2026
     
     if not sources.empty and 'build_year' in sources.columns:
         build_years = sources['build_year'].dropna()
         if not build_years.empty:
             default_min_year = int(build_years.min())
             default_max_year = int(build_years.max())
-        else:
-            default_min_year = 1800
-            default_max_year = 2026
-    else:
-        default_min_year = 1800
-        default_max_year = 2026
     
     col1, col2 = st.columns(2)
     with col1:
-        year_from = st.number_input("From Year", min_value=1800, max_value=2026, value=default_min_year, step=1)
+        year_from = st.number_input("From Year", min_value=1800, max_value=2026, 
+                                    value=default_min_year, step=1)
     with col2:
-        year_to = st.number_input("To Year", min_value=1800, max_value=2026, value=default_max_year, step=1)
+        year_to = st.number_input("To Year", min_value=1800, max_value=2026, 
+                                  value=default_max_year, step=1)
+    
+    # Ensure from <= to
+    if year_from > year_to:
+        year_to = year_from
     year_range = (year_from, year_to)
     
     st.markdown("---")
@@ -418,7 +422,7 @@ with tab1:
             fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
 
-# ===================== TAB 2: MAP VIEW (FIXED WITH FILTERS) =====================
+# ===================== TAB 2: MAP VIEW =====================
 with tab2:
     st.markdown('<p class="section-header">🗺️ National Interactive Water Resources Map</p>', unsafe_allow_html=True)
     
@@ -432,7 +436,6 @@ with tab2:
                  "OpenStreetMap": "OpenStreetMap", "CartoDB Dark": "CartoDB dark_matter", "CartoDB Light": "CartoDB positron"}
     center_lat, center_lon, zoom = 20.5937, 78.9629, 5
     
-    # Use FILTERED sources for map center, not all sources
     if not filtered_sources.empty and 'latitude' in filtered_sources.columns:
         swc = filtered_sources[filtered_sources['latitude'].notna() & filtered_sources['longitude'].notna()]
         if not swc.empty:
@@ -444,7 +447,6 @@ with tab2:
     mc = MarkerCluster().add_to(m) if (show_clusters and len(filtered_sources) > 10) else m
     heat_data, sources_on_map = [], 0
     
-    # Add FILTERED water sources only
     if not filtered_sources.empty and 'latitude' in filtered_sources.columns:
         swc = filtered_sources[filtered_sources['latitude'].notna() & filtered_sources['longitude'].notna()]
         for _, source in swc.iterrows():
@@ -461,7 +463,6 @@ with tab2:
         if show_heatmap and heat_data:
             HeatMap(heat_data, radius=15, blur=10, gradient={0.2:'blue',0.4:'cyan',0.6:'lime',0.8:'yellow',1:'red'}).add_to(m)
     
-    # Add FILTERED monitoring stations
     if show_stations and not filtered_stations.empty and 'latitude' in filtered_stations.columns:
         for _, station in filtered_stations[filtered_stations['latitude'].notna() & filtered_stations['longitude'].notna()].iterrows():
             status = station.get('status', 'Unknown')
@@ -485,7 +486,7 @@ with tab2:
     with cols[3]: st.markdown('<span class="status-dot" style="background:#4287f5;"></span> Monitoring Station', unsafe_allow_html=True)
     with cols[4]: st.markdown('🔥 Heatmap Area', unsafe_allow_html=True)
 
-# ===================== TAB 3: ANALYTICS (FIXED) =====================
+# ===================== TAB 3: ANALYTICS =====================
 with tab3:
     st.markdown('<p class="section-header">📈 Advanced Analytics</p>', unsafe_allow_html=True)
     
@@ -623,19 +624,17 @@ with tab4:
     else:
         st.info("No water quality data available.")
 
-# ===================== TAB 5: ALERTS (SORTED: CRITICAL FIRST, THEN WARNING, THEN STABLE) =====================
+# ===================== TAB 5: ALERTS =====================
 with tab5:
     st.markdown('<p class="section-header">🚨 Active Alerts and Warnings</p>', unsafe_allow_html=True)
     
     if not alerts.empty:
-        # Merge with sources for location info
         if not sources.empty and 'source_name' in sources.columns:
             alerts = alerts.merge(sources[['source_name', 'source_type', 'district', 'state']], on='source_name', how='left')
             for col in ['source_type', 'district', 'state']:
                 if col in alerts.columns:
                     alerts[col] = alerts[col].fillna('Unknown')
         
-        # Apply filters to alerts
         filtered_alerts = alerts.copy()
         if selected_state != "All States" and 'state' in filtered_alerts.columns:
             filtered_alerts = filtered_alerts[filtered_alerts['state'] == selected_state]
@@ -658,7 +657,6 @@ with tab5:
         if filtered_alerts.empty:
             st.success("✅ No alerts match the current filters")
         else:
-            # SORT: CRITICAL first, then WARNING, then STABLE
             severity_order = {'CRITICAL': 0, 'WARNING': 1, 'STABLE': 2}
             filtered_alerts['severity'] = filtered_alerts['alert_status'].map(severity_order)
             filtered_alerts = filtered_alerts.sort_values('severity').drop('severity', axis=1)
@@ -681,7 +679,6 @@ with tab5:
                 if isinstance(alert_time, pd.Timestamp):
                     alert_time = alert_time.strftime('%Y-%m-%d %H:%M:%S')
                 
-                # Generate alert reason
                 reasons = []
                 if capacity < 30:
                     reasons.append(f"Critical capacity: {capacity}%")
@@ -716,7 +713,7 @@ with tab5:
         st.success("✅ No active alerts - All systems normal")
         st.balloons()
 
-# ===================== TAB 6: DATA TABLES (FIXED WITH FILTERS) =====================
+# ===================== TAB 6: DATA TABLES =====================
 with tab6:
     st.markdown('<p class="section-header">📋 Data Explorer</p>', unsafe_allow_html=True)
     
