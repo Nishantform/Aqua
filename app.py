@@ -136,10 +136,15 @@ def kpi_card(col, label, value, sub=""):
 # ─────────────────────────────────────────────────────────────────────────────
 # DATABASE
 # ─────────────────────────────────────────────────────────────────────────────
-NEON_URL = st.secrets["NEON_URL"]
+try:
+    NEON_URL = st.secrets["NEON_URL"]
+except:
+    NEON_URL = None
 
 @st.cache_resource
 def init_connection():
+    if NEON_URL is None:
+        return None
     try:
         engine = create_engine(
             NEON_URL, pool_size=5, max_overflow=10,
@@ -243,7 +248,7 @@ current_year = datetime.now().year
 current_time = datetime.now(pytz.timezone("Asia/Kolkata"))
 
 if not sources.empty:
-    for col in ["capacity_percent", "build_year", "max_capacity_mcm", "current_capacity_mcm"]:
+    for col in ["capacity_percent", "build_year", "max_capacity_mcm"]:
         if col in sources.columns:
             sources[col] = pd.to_numeric(sources[col], errors="coerce")
     if "build_year" in sources.columns:
@@ -270,51 +275,42 @@ if not sources.empty:
         ["📈 Increasing", "📉 Decreasing", "➡️ Stable"], len(sources)
     )
 
-# ── FIX: Safe coordinate merge — no latitude_x / latitude_y clash ────────────
-def safe_add_coords(src_df, sta_df):
-    """
-    Fills missing lat/lon on sources from a district-level lookup in stations.
-    Never creates duplicate lat/lon columns.
-    """
-    if src_df.empty:
-        return src_df
-    df = src_df.copy()
+# ── FIXED: Simple coordinate merge without column duplication ────────────────
+if not sources.empty and not stations.empty:
+    # Create district coordinate lookup from stations
+    station_coords = stations[stations["latitude"].notna() & stations["longitude"].notna()].copy()
+    if not station_coords.empty and "district_name" in station_coords.columns:
+        station_coords["district_clean"] = station_coords["district_name"].str.strip().str.lower()
+        district_lookup = station_coords.groupby("district_clean").agg({
+            "latitude": "first",
+            "longitude": "first"
+        }).reset_index()
+        
+        # Add coordinates to sources
+        sources["district_clean"] = sources["district"].str.strip().str.lower()
+        sources = sources.merge(district_lookup, on="district_clean", how="left")
+        sources = sources.drop("district_clean", axis=1)
+        
+        # Fill missing coordinates with NaN
+        if "latitude_y" in sources.columns:
+            sources["latitude"] = sources["latitude_y"].fillna(sources.get("latitude_x", np.nan))
+            sources["longitude"] = sources["longitude_y"].fillna(sources.get("longitude_x", np.nan))
+            sources = sources.drop(["latitude_x", "latitude_y", "longitude_x", "longitude_y"], axis=1, errors="ignore")
+    else:
+        if "latitude" not in sources.columns:
+            sources["latitude"] = np.nan
+        if "longitude" not in sources.columns:
+            sources["longitude"] = np.nan
+else:
+    if not sources.empty:
+        if "latitude" not in sources.columns:
+            sources["latitude"] = np.nan
+        if "longitude" not in sources.columns:
+            sources["longitude"] = np.nan
 
-    # Build district-key → (lat, lon) dict from stations
-    lookup = {}
-    if (not sta_df.empty
-            and "district_name" in sta_df.columns
-            and "latitude" in sta_df.columns
-            and "longitude" in sta_df.columns):
-        tmp = sta_df[sta_df["latitude"].notna() & sta_df["longitude"].notna()].copy()
-        tmp["_dk"] = tmp["district_name"].astype(str).str.strip().str.lower()
-        for _, row in tmp.drop_duplicates("_dk").iterrows():
-            lookup[row["_dk"]] = (float(row["latitude"]), float(row["longitude"]))
-
-    # Ensure lat/lon columns exist (may come from DB already)
-    if "latitude" not in df.columns:
-        df["latitude"] = np.nan
-    if "longitude" not in df.columns:
-        df["longitude"] = np.nan
-
-    df["latitude"]  = pd.to_numeric(df["latitude"],  errors="coerce")
-    df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
-
-    # Only fill rows that are still missing coordinates
-    if "district" in df.columns and lookup:
-        df["_dk"] = df["district"].astype(str).str.strip().str.lower()
-        missing = df["latitude"].isna()
-        df.loc[missing, "latitude"]  = df.loc[missing, "_dk"].map(
-            lambda k: lookup.get(k, (np.nan, np.nan))[0]
-        )
-        df.loc[missing, "longitude"] = df.loc[missing, "_dk"].map(
-            lambda k: lookup.get(k, (np.nan, np.nan))[1]
-        )
-        df.drop(columns=["_dk"], inplace=True)
-
-    return df
-
-sources = safe_add_coords(sources, stations)
+# Convert to float
+sources["latitude"] = pd.to_numeric(sources["latitude"], errors="coerce")
+sources["longitude"] = pd.to_numeric(sources["longitude"], errors="coerce")
 
 if not groundwater.empty:
     if "avg_depth_meters" in groundwater.columns:
@@ -341,13 +337,12 @@ if not rainfall.empty:
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR FILTERS
 # ─────────────────────────────────────────────────────────────────────────────
-# Precompute slider bounds so we can reference them later for tag display
-_cap_min = float(sources["capacity_percent"].min()) if not sources.empty and "capacity_percent" in sources.columns else 0.0
-_cap_max = float(sources["capacity_percent"].max()) if not sources.empty and "capacity_percent" in sources.columns else 100.0
-_by_min  = int(sources["build_year"].dropna().min()) if not sources.empty and "build_year" in sources.columns and len(sources["build_year"].dropna()) > 0 else 1800
-_by_max  = int(sources["build_year"].dropna().max()) if not sources.empty and "build_year" in sources.columns and len(sources["build_year"].dropna()) > 0 else current_year
-_r_min   = float(rainfall["rainfall_cm"].min()) if not rainfall.empty and "rainfall_cm" in rainfall.columns else 0.0
-_r_max   = float(rainfall["rainfall_cm"].max()) if not rainfall.empty and "rainfall_cm" in rainfall.columns else 1000.0
+_cap_min = float(sources["capacity_percent"].min()) if not sources.empty and "capacity_percent" in sources.columns and not sources["capacity_percent"].isna().all() else 0.0
+_cap_max = float(sources["capacity_percent"].max()) if not sources.empty and "capacity_percent" in sources.columns and not sources["capacity_percent"].isna().all() else 100.0
+_by_min  = int(sources["build_year"].min()) if not sources.empty and "build_year" in sources.columns and not sources["build_year"].isna().all() else 1800
+_by_max  = int(sources["build_year"].max()) if not sources.empty and "build_year" in sources.columns and not sources["build_year"].isna().all() else current_year
+_r_min   = float(rainfall["rainfall_cm"].min()) if not rainfall.empty and "rainfall_cm" in rainfall.columns and not rainfall["rainfall_cm"].isna().all() else 0.0
+_r_max   = float(rainfall["rainfall_cm"].max()) if not rainfall.empty and "rainfall_cm" in rainfall.columns and not rainfall["rainfall_cm"].isna().all() else 1000.0
 
 with st.sidebar:
     st.title("🎮 AQUASTAT")
@@ -434,7 +429,6 @@ def apply_source_filters():
     if selected_risk != "All Risk Levels" and "risk_level" in df.columns:
         df = df[df["risk_level"] == selected_risk]
     if "build_year" in df.columns:
-        # Keep rows where build_year is NaN (we don't know) OR within range
         df = df[df["build_year"].isna() | df["build_year"].between(year_range[0], year_range[1])]
     return df
 
@@ -517,159 +511,87 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "💧 Water Quality", "⚠️ Alerts", "📋 Data Tables",
 ])
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — DASHBOARD
-# ══════════════════════════════════════════════════════════════════════════════
+# ===================== TAB 1: DASHBOARD =====================
 with tab1:
     if filtered_sources.empty:
-        st.warning("⚠️ No sources match the current filters. Try resetting some filters.")
+        st.warning("⚠️ No water sources match the current filters.")
     else:
-        r1c1, r1c2 = st.columns(2)
-
-        with r1c1:
-            st.markdown('<p class="sec-hdr">📊 Capacity Distribution</p>', unsafe_allow_html=True)
-            if "capacity_percent" in filtered_sources.columns:
-                cap_vals = filtered_sources["capacity_percent"].dropna()
-                fig = go.Figure(go.Histogram(
-                    x=cap_vals, nbinsx=25,
-                    marker=dict(color=cap_vals,
-                                colorscale=[[0,"#e74c3c"],[0.4,"#f1c40f"],[1,"#2ecc71"]],
-                                showscale=False, line=dict(color="rgba(0,0,0,0)",width=0)),
-                    opacity=0.85,
-                ))
-                fig.add_vrect(x0=0,  x1=30,  fillcolor="rgba(231,76,60,.07)",  line_width=0)
-                fig.add_vrect(x0=30, x1=60,  fillcolor="rgba(241,196,15,.05)", line_width=0)
-                fig.add_vrect(x0=60, x1=100, fillcolor="rgba(46,204,113,.05)", line_width=0)
-                apply_layout(fig, title=f"Storage Capacity — {len(filtered_sources)} sources",
-                             xaxis_title="Capacity (%)", yaxis_title="No. of Sources")
-                st.plotly_chart(fig, use_container_width=True)
-
-        with r1c2:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('<p class="sec-hdr">📊 Storage Capacity Table</p>', unsafe_allow_html=True)
+            if 'capacity_percent' in filtered_sources.columns:
+                capacity_table = filtered_sources[['source_name', 'source_type', 'capacity_percent', 'state', 'district', 'risk_level']].sort_values('capacity_percent')
+                capacity_table['capacity_percent'] = capacity_table['capacity_percent'].round(1).astype(str) + '%'
+                st.dataframe(capacity_table, use_container_width=True, hide_index=True)
+        
+        with col2:
             st.markdown('<p class="sec-hdr">🏭 Source Types</p>', unsafe_allow_html=True)
-            if "source_type" in filtered_sources.columns:
-                tc = filtered_sources["source_type"].value_counts().reset_index()
-                tc.columns = ["Source Type", "Count"]
-                fig = go.Figure(go.Pie(
-                    labels=tc["Source Type"], values=tc["Count"], hole=0.5,
-                    marker=dict(colors=["#00e5ff","#2ecc71","#f1c40f","#e74c3c",
-                                        "#9b59b6","#3498db","#e67e22"],
-                                line=dict(color="#06121f", width=2)),
-                    textinfo="percent+label", textfont=dict(size=11),
-                ))
-                apply_layout(fig, title="Water Sources by Type")
-                fig.update_traces(pull=[0.03] * len(tc))
+            if 'source_type' in filtered_sources.columns:
+                type_counts = filtered_sources['source_type'].value_counts().reset_index()
+                type_counts.columns = ['Source Type', 'Count']
+                fig = px.pie(type_counts, values='Count', names='Source Type', title="Water Sources by Type", 
+                            template="plotly_dark", color_discrete_sequence=px.colors.sequential.Tealgrn)
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig, use_container_width=True)
-
-        r2c1, r2c2 = st.columns(2)
-
-        with r2c1:
-            st.markdown('<p class="sec-hdr">🌊 Groundwater Stress</p>', unsafe_allow_html=True)
-            if not groundwater.empty and "stress_level" in groundwater.columns:
-                fgw = groundwater.copy()
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('<p class="sec-hdr">📈 Groundwater Analysis</p>', unsafe_allow_html=True)
+            if not groundwater.empty:
+                filtered_gw = groundwater.copy()
                 if filtered_districts:
-                    fgw = fgw[fgw["district_name"].isin(filtered_districts)]
-                if not fgw.empty:
-                    sc = fgw["stress_level"].value_counts().reset_index()
-                    sc.columns = ["Stress Level", "Count"]
-                    sc["Stress Level"] = pd.Categorical(sc["Stress Level"],
-                                                        categories=["Low","Moderate","High"], ordered=True)
-                    sc = sc.sort_values("Stress Level")
-                    clr_map = {"Low":"#2ecc71","Moderate":"#f1c40f","High":"#e74c3c"}
-                    fig = go.Figure(go.Bar(
-                        x=sc["Stress Level"], y=sc["Count"],
-                        marker=dict(color=[clr_map.get(str(x),"#00e5ff") for x in sc["Stress Level"]],
-                                    cornerradius=6),
-                        text=sc["Count"], textposition="outside", textfont=dict(color="#cfe4f7"),
-                    ))
-                    apply_layout(fig, title="Groundwater Stress Distribution",
-                                 yaxis_title="Districts", xaxis_title="Stress Level")
+                    filtered_gw = filtered_gw[filtered_gw["district_name"].isin(filtered_districts)]
+                if not filtered_gw.empty:
+                    stress_counts = filtered_gw['stress_level'].value_counts().reset_index()
+                    stress_counts.columns = ['Stress Level', 'Count']
+                    fig = px.bar(stress_counts, x='Stress Level', y='Count', title="Groundwater Stress Distribution", 
+                                template="plotly_dark", color='Stress Level', 
+                                color_discrete_map={'Low':'#00ff9d','Moderate':'#ffd700','High':'#ff4444'}, text_auto=True)
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.markdown("#### 📋 Groundwater Details")
+                    gw_table = filtered_gw[['district_name', 'avg_depth_meters', 'extraction_pct', 'recharge_rate_mcm', 'assessment_year', 'stress_level']].sort_values('avg_depth_meters')
+                    gw_table['avg_depth_meters'] = gw_table['avg_depth_meters'].round(1).astype(str) + ' m'
+                    gw_table['extraction_pct'] = gw_table['extraction_pct'].round(1).astype(str) + '%'
+                    gw_table['recharge_rate_mcm'] = gw_table['recharge_rate_mcm'].round(1).astype(str) + ' MCM'
+                    st.dataframe(gw_table, use_container_width=True, hide_index=True)
                 else:
-                    st.info("No groundwater data for current filter.")
-
-        with r2c2:
-            st.markdown('<p class="sec-hdr">☔ Rainfall by Season</p>', unsafe_allow_html=True)
-            if not rainfall.empty and "season" in rainfall.columns and "rainfall_cm" in rainfall.columns:
-                fr = rainfall.copy()
+                    st.info("No groundwater data available")
+        
+        with col2:
+            st.markdown('<p class="sec-hdr">☔ Rainfall Analysis</p>', unsafe_allow_html=True)
+            if not rainfall.empty:
+                filtered_rain = rainfall.copy()
                 if filtered_districts:
-                    fr = fr[fr["district_name"].isin(filtered_districts)]
-                if not fr.empty:
-                    sr = fr.groupby("season")["rainfall_cm"].mean().reset_index()
-                    fig = go.Figure(go.Bar(
-                        x=sr["season"], y=sr["rainfall_cm"].round(1),
-                        marker=dict(color=sr["rainfall_cm"],
-                                    colorscale=[[0,"#003f5c"],[0.5,"#00a6cc"],[1,"#00e5ff"]],
-                                    showscale=False, cornerradius=6),
-                        text=sr["rainfall_cm"].round(1), textposition="outside",
-                        textfont=dict(color="#cfe4f7"),
-                    ))
-                    apply_layout(fig, title="Average Rainfall by Season (cm)",
-                                 yaxis_title="Rainfall (cm)", xaxis_title="Season")
+                    filtered_rain = filtered_rain[filtered_rain["district_name"].isin(filtered_districts)]
+                if not filtered_rain.empty:
+                    season_rain = filtered_rain.groupby('season')['rainfall_cm'].mean().reset_index()
+                    fig = px.bar(season_rain, x='season', y='rainfall_cm', title="Average Rainfall by Season", 
+                                template="plotly_dark", color='rainfall_cm', color_continuous_scale='Blues', text_auto='.1f')
+                    fig.update_traces(textposition='outside')
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.markdown("#### 📋 Rainfall Details")
+                    rain_table = filtered_rain[['district_name', 'rainfall_cm', 'record_year', 'season', 'rainfall_category']].sort_values('rainfall_cm', ascending=False)
+                    rain_table['rainfall_cm'] = rain_table['rainfall_cm'].round(1).astype(str) + ' cm'
+                    st.dataframe(rain_table, use_container_width=True, hide_index=True)
                 else:
-                    st.info("No rainfall data for current filter.")
-
-        r3c1, r3c2 = st.columns(2)
-
-        with r3c1:
+                    st.info("No rainfall data available for selected filters")
+        
+        if 'risk_level' in filtered_sources.columns:
             st.markdown('<p class="sec-hdr">⚠️ Risk Assessment</p>', unsafe_allow_html=True)
-            if "risk_level" in filtered_sources.columns:
-                rc = filtered_sources["risk_level"].value_counts()
-                fig = go.Figure()
-                for lvl, clr in [("Critical","#e74c3c"),("Moderate","#f1c40f"),("Good","#2ecc71")]:
-                    cnt = int(rc.get(lvl, 0))
-                    fig.add_trace(go.Bar(
-                        name=lvl, x=[lvl], y=[cnt],
-                        marker=dict(color=clr, cornerradius=6),
-                        text=[cnt], textposition="outside",
-                        textfont=dict(color="#cfe4f7", size=13),
-                    ))
-                apply_layout(fig, title="Infrastructure Risk Breakdown",
-                             yaxis_title="Sources", xaxis_title="")
-                fig.update_layout(showlegend=False, barmode="group")
-                st.plotly_chart(fig, use_container_width=True)
+            risk_counts = filtered_sources['risk_level'].value_counts().reset_index()
+            risk_counts.columns = ['Risk Level', 'Count']
+            fig = px.bar(risk_counts, x='Risk Level', y='Count', color='Risk Level', 
+                        color_discrete_map={'Good':'#00ff9d','Moderate':'#ffd700','Critical':'#ff4444'}, 
+                        title="Infrastructure Risk Assessment", template="plotly_dark", text_auto=True)
+            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
 
-        with r3c2:
-            st.markdown('<p class="sec-hdr">🏛️ State Capacity Overview</p>', unsafe_allow_html=True)
-            if "state" in filtered_sources.columns and "capacity_percent" in filtered_sources.columns:
-                sc_state = (
-                    filtered_sources.groupby("state")["capacity_percent"]
-                    .mean().sort_values(ascending=False).head(10).reset_index()
-                )
-                sc_state.columns = ["State", "Avg Capacity"]
-                fig = go.Figure(go.Bar(
-                    x=sc_state["Avg Capacity"].round(1), y=sc_state["State"],
-                    orientation="h",
-                    marker=dict(color=sc_state["Avg Capacity"],
-                                colorscale=[[0,"#e74c3c"],[0.4,"#f1c40f"],[1,"#2ecc71"]],
-                                showscale=True,
-                                colorbar=dict(title="Cap %", tickfont=dict(color="#7fa8c8")),
-                                cornerradius=4),
-                    text=sc_state["Avg Capacity"].round(1).astype(str) + "%",
-                    textposition="auto", textfont=dict(color="#cfe4f7"),
-                ))
-                apply_layout(fig, title="Top 10 States by Avg Capacity",
-                             xaxis_title="Avg Capacity (%)", yaxis_title="")
-                fig.update_layout(yaxis=dict(autorange="reversed"))
-                st.plotly_chart(fig, use_container_width=True)
-
-        # Rainfall district table (from rainfall slider)
-        if rain_district_names:
-            st.markdown('<p class="sec-hdr">☔ Districts Matching Rainfall Filter</p>', unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="rain-info">🌧️ <b>{len(rain_district_names)}</b> districts with avg rainfall '
-                f'between <b>{rainfall_range[0]:.0f} cm</b> and <b>{rainfall_range[1]:.0f} cm</b></div>',
-                unsafe_allow_html=True,
-            )
-            disp = rain_districts_df.copy()
-            disp["avg_rain_cm"] = disp["avg_rain_cm"].round(2)
-            disp.columns = ["District", "Avg Rainfall (cm)"]
-            st.dataframe(disp.sort_values("Avg Rainfall (cm)", ascending=False),
-                         use_container_width=True, hide_index=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — MAP VIEW
-# ══════════════════════════════════════════════════════════════════════════════
+# ===================== TAB 2: MAP VIEW (FIXED) =====================
 with tab2:
     st.markdown('<p class="sec-hdr">🗺️ National Interactive Water Resources Map</p>', unsafe_allow_html=True)
 
@@ -739,17 +661,23 @@ with tab2:
             <b style="color:{clr};font-size:1rem;">{row.get('source_name','Unknown')}</b>
             <hr style="border-color:#1a3550;margin:6px 0">
             <table style="width:100%;font-size:.82rem;">
-                <tr><td style="color:#7fa8c8;padding-right:8px">Type</td>
-                    <td>{row.get('source_type','—')}</td></tr>
-                <tr><td style="color:#7fa8c8">State</td><td>{row.get('state','—')}</td></tr>
-                <tr><td style="color:#7fa8c8">District</td><td>{row.get('district','—')}</td></tr>
-                <tr><td style="color:#7fa8c8">Capacity</td><td>{cap:.1f}%</td></tr>
-                <tr><td style="color:#7fa8c8">Build Year</td><td>{build_yr}</td></tr>
-                <tr><td style="color:#7fa8c8">Age</td><td>{row.get('age',0):.0f} yrs</td></tr>
-                <tr><td style="color:#7fa8c8">Risk</td>
-                    <td><b style="color:{clr}">{risk_txt}</b></td></tr>
-                <tr><td style="color:#7fa8c8">Trend</td><td>{row.get('trend','—')}</td></tr>
-            </table>
+                  <tr><td style="color:#7fa8c8;padding-right:8px">Type</td>
+                      <td>{row.get('source_type','—')}</td></tr>
+                  <tr><td style="color:#7fa8c8">State</td>
+                      <td>{row.get('state','—')}</td></tr>
+                  <tr><td style="color:#7fa8c8">District</td>
+                      <td>{row.get('district','—')}</td></tr>
+                  <tr><td style="color:#7fa8c8">Capacity</td>
+                      <td>{cap:.1f}%</td></tr>
+                  <tr><td style="color:#7fa8c8">Build Year</td>
+                      <td>{build_yr}</td></tr>
+                  <tr><td style="color:#7fa8c8">Age</td>
+                      <td>{row.get('age',0):.0f} yrs</td></tr>
+                  <tr><td style="color:#7fa8c8">Risk</td>
+                      <td><b style="color:{clr}">{risk_txt}</b></td></tr>
+                  <tr><td style="color:#7fa8c8">Trend</td>
+                      <td>{row.get('trend','—')}</td></tr>
+             </table>
         </div>"""
 
         folium.CircleMarker(
@@ -832,259 +760,247 @@ with tab2:
     leg[3].markdown('<span class="dot dot-blue"></span> Monitoring Station',  unsafe_allow_html=True)
     leg[4].markdown('🔵 Rainfall District (when enabled)',                    unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — ANALYTICS
-# ══════════════════════════════════════════════════════════════════════════════
+# ===================== TAB 3: ANALYTICS =====================
 with tab3:
     st.markdown('<p class="sec-hdr">📈 Advanced Analytics</p>', unsafe_allow_html=True)
-
+    
     atab1, atab2, atab3 = st.tabs(["📊 Trends", "📉 Comparisons", "📐 Statistics"])
-
+    
     with atab1:
-        ac1, ac2 = st.columns(2)
-        with ac1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
             st.subheader("Rainfall Trend")
-            if not rainfall.empty and "record_year" in rainfall.columns:
-                fr = rainfall.copy()
+            if not rainfall.empty and 'record_year' in rainfall.columns and 'rainfall_cm' in rainfall.columns:
+                filtered_rain = rainfall.copy()
                 if filtered_districts:
-                    fr = fr[fr["district_name"].isin(filtered_districts)]
-                if not fr.empty:
-                    rt = fr.groupby("record_year")["rainfall_cm"].mean().reset_index()
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=rt["record_year"], y=rt["rainfall_cm"], mode="lines+markers",
-                        line=dict(color="#00e5ff", width=3),
-                        marker=dict(size=7, color="#00e5ff", line=dict(color="#06121f",width=1.5)),
-                        fill="tozeroy", fillcolor="rgba(0,229,255,0.08)",
-                    ))
-                    apply_layout(fig, title="Average Annual Rainfall (cm)",
-                                 xaxis_title="Year", yaxis_title="Rainfall (cm)")
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No rainfall data for current filter.")
-
-        with ac2:
-            st.subheader("Groundwater Depth Trend")
-            if not groundwater.empty and "assessment_year" in groundwater.columns:
-                fgw = groundwater.copy()
+                    filtered_rain = filtered_rain[filtered_rain["district_name"].isin(filtered_districts)]
+                if not filtered_rain.empty:
+                    rain_trend = filtered_rain.groupby('record_year')['rainfall_cm'].mean().reset_index()
+                    if not rain_trend.empty:
+                        fig = px.line(rain_trend, x='record_year', y='rainfall_cm', title="Average Rainfall Over Years", 
+                                    template="plotly_dark", markers=True)
+                        fig.update_traces(line_color='#00e5ff', line_width=3)
+                        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                        st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("Groundwater Trend")
+            if not groundwater.empty and 'assessment_year' in groundwater.columns and 'avg_depth_meters' in groundwater.columns:
+                filtered_gw = groundwater.copy()
                 if filtered_districts:
-                    fgw = fgw[fgw["district_name"].isin(filtered_districts)]
-                if not fgw.empty:
-                    gt = fgw.groupby("assessment_year")["avg_depth_meters"].mean().reset_index()
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=gt["assessment_year"], y=gt["avg_depth_meters"], mode="lines+markers",
-                        line=dict(color="#f1c40f", width=3),
-                        marker=dict(size=7, color="#f1c40f", line=dict(color="#06121f",width=1.5)),
-                        fill="tozeroy", fillcolor="rgba(241,196,15,0.08)",
-                    ))
-                    apply_layout(fig, title="Average Groundwater Depth (m)",
-                                 xaxis_title="Year", yaxis_title="Depth (m)")
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No groundwater data for current filter.")
-
+                    filtered_gw = filtered_gw[filtered_gw["district_name"].isin(filtered_districts)]
+                if not filtered_gw.empty:
+                    gw_trend = filtered_gw.groupby('assessment_year')['avg_depth_meters'].mean().reset_index()
+                    if not gw_trend.empty:
+                        fig = px.line(gw_trend, x='assessment_year', y='avg_depth_meters', title="Average Groundwater Depth", 
+                                    template="plotly_dark", markers=True)
+                        fig.update_traces(line_color='#ffd700', line_width=3)
+                        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                        st.plotly_chart(fig, use_container_width=True)
+    
     with atab2:
-        ac1, ac2 = st.columns(2)
-        with ac1:
-            st.subheader("State Capacity Comparison")
-            if not filtered_sources.empty and "state" in filtered_sources.columns:
-                sc_s = (filtered_sources.groupby("state")["capacity_percent"]
-                        .mean().sort_values(ascending=False).head(10).reset_index())
-                sc_s.columns = ["State", "Avg Capacity"]
-                fig = go.Figure(go.Bar(
-                    x=sc_s["Avg Capacity"].round(1), y=sc_s["State"], orientation="h",
-                    marker=dict(color=sc_s["Avg Capacity"],
-                                colorscale=[[0,"#e74c3c"],[0.5,"#f1c40f"],[1,"#2ecc71"]],
-                                showscale=True, cornerradius=5),
-                    text=sc_s["Avg Capacity"].round(1).astype(str)+"%",
-                    textposition="auto", textfont=dict(color="#cfe4f7"),
-                ))
-                apply_layout(fig, title="State Comparison", xaxis_title="Avg Capacity (%)", yaxis_title="")
-                fig.update_layout(yaxis=dict(autorange="reversed"))
-                st.plotly_chart(fig, use_container_width=True)
-
-        with ac2:
-            st.subheader("GW Extraction vs Recharge")
-            if not groundwater.empty and "recharge_rate_mcm" in groundwater.columns:
-                fgw = groundwater.copy()
-                if filtered_districts:
-                    fgw = fgw[fgw["district_name"].isin(filtered_districts)]
-                if not fgw.empty:
-                    fig = px.scatter(
-                        fgw, x="recharge_rate_mcm", y="extraction_pct",
-                        size="avg_depth_meters" if "avg_depth_meters" in fgw.columns else None,
-                        color="district_name" if "district_name" in fgw.columns else None,
-                        template="plotly_dark", title="Extraction % vs Recharge Rate (MCM)",
-                        color_discrete_sequence=px.colors.qualitative.Safe,
-                    )
-                    apply_layout(fig, xaxis_title="Recharge Rate (MCM)", yaxis_title="Extraction %")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Capacity by State")
+            if not filtered_sources.empty and 'state' in filtered_sources.columns and 'capacity_percent' in filtered_sources.columns:
+                state_cap = filtered_sources.groupby('state')['capacity_percent'].mean().sort_values(ascending=False).head(10)
+                if len(state_cap) > 0:
+                    fig = px.bar(x=state_cap.values, y=state_cap.index, orientation='h', title="Average Capacity by State", 
+                                template="plotly_dark", color=state_cap.values, color_continuous_scale='Tealgrn', 
+                                labels={'x':'Avg Capacity (%)','y':'State'})
+                    fig.update_traces(texttemplate='%{x:.1f}%', textposition='outside')
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                     st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No groundwater data for current filter.")
-
+        
+        with col2:
+            st.subheader("Extraction vs Recharge")
+            if not groundwater.empty and 'recharge_rate_mcm' in groundwater.columns and 'extraction_pct' in groundwater.columns:
+                filtered_gw = groundwater.copy()
+                if filtered_districts:
+                    filtered_gw = filtered_gw[filtered_gw["district_name"].isin(filtered_districts)]
+                if not filtered_gw.empty:
+                    fig = px.scatter(filtered_gw, x='recharge_rate_mcm', y='extraction_pct', 
+                                    size='avg_depth_meters' if 'avg_depth_meters' in filtered_gw.columns else None,
+                                    color='district_name' if 'district_name' in filtered_gw.columns else None,
+                                    title="Groundwater Extraction vs Recharge", template="plotly_dark")
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+    
     with atab3:
-        ac1, ac2 = st.columns(2)
-        with ac1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
             st.subheader("Statistical Summary")
             if not filtered_sources.empty:
-                sc = [c for c in ["capacity_percent","age","health_score"] if c in filtered_sources.columns]
-                if sc:
-                    st.dataframe(filtered_sources[sc].describe().round(2), use_container_width=True)
-        with ac2:
+                stats_cols = [c for c in ['capacity_percent', 'age', 'health_score'] if c in filtered_sources.columns]
+                if stats_cols:
+                    st.dataframe(filtered_sources[stats_cols].describe().style.format("{:.2f}"), use_container_width=True)
+        
+        with col2:
             st.subheader("Correlation Matrix")
-            if not filtered_sources.empty and not groundwater.empty and "district" in filtered_sources.columns:
-                fgw = groundwater.copy()
-                if filtered_districts:
-                    fgw = fgw[fgw["district_name"].isin(filtered_districts)]
-                merged = filtered_sources.merge(fgw, left_on="district", right_on="district_name", how="inner")
-                nc = [c for c in ["capacity_percent","age","avg_depth_meters","extraction_pct","recharge_rate_mcm"]
-                      if c in merged.columns]
-                if len(nc) >= 2:
-                    corr = merged[nc].dropna().corr()
-                    fig = px.imshow(corr, text_auto=".2f", aspect="auto",
-                                    color_continuous_scale="RdBu_r", template="plotly_dark",
-                                    title="Feature Correlation Matrix")
-                    apply_layout(fig)
-                    st.plotly_chart(fig, use_container_width=True)
+            if not filtered_sources.empty and not groundwater.empty and 'district' in filtered_sources.columns and 'district_name' in groundwater.columns:
+                merged = filtered_sources.merge(groundwater, left_on='district', right_on='district_name', how='inner')
+                if not merged.empty:
+                    numeric_cols = [c for c in ['capacity_percent', 'age', 'avg_depth_meters', 'extraction_pct', 'recharge_rate_mcm'] if c in merged.columns]
+                    if len(numeric_cols) >= 2:
+                        corr_data = merged[numeric_cols].dropna()
+                        if not corr_data.empty:
+                            fig = px.imshow(corr_data.corr(), text_auto=True, aspect="auto", title="Correlation Matrix", 
+                                          template="plotly_dark", color_continuous_scale='RdBu_r')
+                            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                            st.plotly_chart(fig, use_container_width=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — WATER QUALITY
-# ══════════════════════════════════════════════════════════════════════════════
+# ===================== TAB 4: WATER QUALITY =====================
 with tab4:
     st.markdown('<p class="sec-hdr">💧 Water Quality Monitoring</p>', unsafe_allow_html=True)
-
+    
     fwq = water_quality.copy()
     if not fwq.empty:
         if selected_state    != "All States"    and "state_name"    in fwq.columns:
             fwq = fwq[fwq["state_name"] == selected_state]
         if selected_district != "All Districts" and "district_name" in fwq.columns:
             fwq = fwq[fwq["district_name"] == selected_district]
-
+    
     if not fwq.empty:
-        avg_ph = fwq["ph_level"].mean()             if "ph_level"              in fwq.columns else 0
-        avg_do = fwq["dissolved_oxygen_mg_l"].mean() if "dissolved_oxygen_mg_l" in fwq.columns else 0
-        avg_tb = fwq["turbidity_ntu"].mean()         if "turbidity_ntu"         in fwq.columns else 0
-
-        kq1, kq2, kq3, kq4 = st.columns(4)
-        kpi_card(kq1, "Average pH",        f"{avg_ph:.2f}",      "6.5–8.5 is safe")
-        kpi_card(kq2, "Dissolved Oxygen",  f"{avg_do:.1f} mg/L", ">5 mg/L is healthy")
-        kpi_card(kq3, "Turbidity",         f"{avg_tb:.1f} NTU",  "<4 NTU is ideal")
-        kpi_card(kq4, "Total Stations",    str(len(fwq)),         "monitored")
-
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            avg_ph = fwq['ph_level'].mean() if 'ph_level' in fwq.columns else 0
+            st.metric("Average pH", f"{avg_ph:.2f}", delta=None)
+        with col2:
+            avg_do = fwq['dissolved_oxygen_mg_l'].mean() if 'dissolved_oxygen_mg_l' in fwq.columns else 0
+            st.metric("Dissolved Oxygen", f"{avg_do:.1f} mg/L", delta=None)
+        with col3:
+            avg_turbidity = fwq['turbidity_ntu'].mean() if 'turbidity_ntu' in fwq.columns else 0
+            st.metric("Turbidity", f"{avg_turbidity:.1f} NTU", delta=None)
+        with col4:
+            active_count = len(fwq[fwq['status'] == 'Active']) if 'status' in fwq.columns else 0
+            st.metric("Active Stations", active_count, delta=None)
+        
         st.markdown("---")
-        wc1, wc2 = st.columns(2)
-
-        with wc1:
-            if "ph_level" in fwq.columns:
-                ph_vals = fwq["ph_level"].dropna()
-                fig = go.Figure(go.Histogram(
-                    x=ph_vals, nbinsx=20,
-                    marker=dict(color=ph_vals,
-                                colorscale=[[0,"#e74c3c"],[0.45,"#2ecc71"],[1,"#e74c3c"]],
-                                showscale=False, line=dict(width=0)),
-                    opacity=0.85,
-                ))
-                fig.add_vline(x=7.0, line=dict(color="white", dash="dot", width=1.5),
-                              annotation_text="Neutral pH 7", annotation_position="top left",
-                              annotation_font_color="#cfe4f7")
-                fig.add_vrect(x0=6.5, x1=8.5, fillcolor="rgba(46,204,113,.07)", line_width=0)
-                apply_layout(fig, title="pH Level Distribution", xaxis_title="pH", yaxis_title="Stations")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if 'ph_level' in fwq.columns:
+                fig = px.histogram(fwq, x='ph_level', nbins=20, title="pH Distribution", 
+                                  template="plotly_dark", color_discrete_sequence=['#00e5ff'])
+                fig.add_vline(x=7, line_dash="dash", line_color="white")
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig, use_container_width=True)
-
-        with wc2:
-            if "dissolved_oxygen_mg_l" in fwq.columns:
-                fig = go.Figure()
-                fig.add_trace(go.Box(
-                    y=fwq["dissolved_oxygen_mg_l"].dropna(), name="DO",
-                    marker=dict(color="#2ecc71", outliercolor="#e74c3c"),
-                    line=dict(color="#2ecc71"), fillcolor="rgba(46,204,113,.15)", boxmean=True,
-                ))
-                fig.add_hline(y=5, line=dict(color="#ffd700", dash="dot"),
-                              annotation_text="Min healthy (5 mg/L)", annotation_font_color="#ffd700")
-                apply_layout(fig, title="Dissolved Oxygen Distribution", yaxis_title="DO (mg/L)")
+        with col2:
+            if 'dissolved_oxygen_mg_l' in fwq.columns:
+                fig = px.box(fwq, y='dissolved_oxygen_mg_l', title="Dissolved Oxygen Distribution", 
+                            template="plotly_dark", color_discrete_sequence=['#00ff9d'])
+                fig.add_hline(y=4, line_dash="dash", line_color="red", annotation_text="Critical Level (4 mg/L)")
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown("### 📋 Live Readings")
-        dc = [c for c in ["station_name","state_name","district_name","ph_level",
-                           "dissolved_oxygen_mg_l","turbidity_ntu","status"] if c in fwq.columns]
-        if dc:
-            st.dataframe(fwq[dc].reset_index(drop=True), use_container_width=True, hide_index=True)
+        
+        st.markdown("### 📋 Water Quality Readings")
+        display_cols = ['station_name', 'district_name', 'ph_level', 'dissolved_oxygen_mg_l', 'turbidity_ntu', 'status']
+        available_cols = [c for c in display_cols if c in fwq.columns]
+        if available_cols:
+            display_df = fwq[available_cols].copy()
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
-        st.info("No water quality data matches the current filter.")
+        st.info("No water quality data available.")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — ALERTS
-# ══════════════════════════════════════════════════════════════════════════════
+# ===================== TAB 5: ALERTS =====================
 with tab5:
-    st.markdown('<p class="sec-hdr">🚨 Active Alerts & Warnings</p>', unsafe_allow_html=True)
-
+    st.markdown('<p class="sec-hdr">🚨 Active Alerts and Warnings</p>', unsafe_allow_html=True)
+    
     if not alerts.empty:
-        crit_n = len(alerts[alerts["alert_status"]=="CRITICAL"]) if "alert_status" in alerts.columns else 0
-        warn_n = len(alerts[alerts["alert_status"]=="WARNING"])  if "alert_status" in alerts.columns else 0
-        stbl_n = len(alerts[alerts["alert_status"]=="STABLE"])   if "alert_status" in alerts.columns else 0
-
-        ba1, ba2, ba3 = st.columns(3)
-        ba1.markdown(f'<div class="badge-critical">🔴 CRITICAL: {crit_n}</div>', unsafe_allow_html=True)
-        ba2.markdown(f'<div class="badge-warning">🟡 WARNING: {warn_n}</div>',   unsafe_allow_html=True)
-        ba3.markdown(f'<div class="badge-good">🟢 STABLE: {stbl_n}</div>',       unsafe_allow_html=True)
-
+        if not sources.empty and 'source_name' in sources.columns:
+            alerts = alerts.merge(sources[['source_name', 'source_type', 'district', 'state']], on='source_name', how='left')
+            for col in ['source_type', 'district', 'state']:
+                if col in alerts.columns:
+                    alerts[col] = alerts[col].fillna('Unknown')
+        
+        filtered_alerts = alerts.copy()
+        if selected_state != "All States" and 'state' in filtered_alerts.columns:
+            filtered_alerts = filtered_alerts[filtered_alerts['state'] == selected_state]
+        if selected_district != "All Districts" and 'district' in filtered_alerts.columns:
+            filtered_alerts = filtered_alerts[filtered_alerts['district'] == selected_district]
+        if selected_type != "All Types" and 'source_type' in filtered_alerts.columns:
+            filtered_alerts = filtered_alerts[filtered_alerts['source_type'] == selected_type]
+        
+        critical_alerts = filtered_alerts[filtered_alerts['alert_status'] == 'CRITICAL'] if 'alert_status' in filtered_alerts.columns else pd.DataFrame()
+        warning_alerts = filtered_alerts[filtered_alerts['alert_status'] == 'WARNING'] if 'alert_status' in filtered_alerts.columns else pd.DataFrame()
+        stable_alerts = filtered_alerts[filtered_alerts['alert_status'] == 'STABLE'] if 'alert_status' in filtered_alerts.columns else pd.DataFrame()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1: st.markdown(f'<div class="badge-critical">🔴 CRITICAL: {len(critical_alerts)}</div>', unsafe_allow_html=True)
+        with col2: st.markdown(f'<div class="badge-warning">🟡 WARNING: {len(warning_alerts)}</div>', unsafe_allow_html=True)
+        with col3: st.markdown(f'<div class="badge-good">🟢 STABLE: {len(stable_alerts)}</div>', unsafe_allow_html=True)
+        
         st.markdown("---")
-
-        falerts = alerts.copy()
-        # Filter alerts using source names that belong to the filtered sources set
-        if (not filtered_sources.empty
-                and "source_name" in filtered_sources.columns
-                and "source_name" in falerts.columns
-                and (selected_state != "All States" or selected_district != "All Districts")):
-            valid_srcs = filtered_sources["source_name"].dropna().unique().tolist()
-            falerts = falerts[falerts["source_name"].isin(valid_srcs)]
-
-        if falerts.empty:
+        
+        if filtered_alerts.empty:
             st.success("✅ No alerts match the current filters")
         else:
-            for _, al in falerts.iterrows():
-                astatus = al.get("alert_status", "UNKNOWN")
-                emoji   = "🔴" if astatus=="CRITICAL" else "🟡" if astatus=="WARNING" else "🟢"
-                src_info = None
-                if not sources.empty and "source_name" in sources.columns:
-                    sm = sources[sources["source_name"] == al.get("source_name","")]
-                    if not sm.empty:
-                        src_info = sm.iloc[0]
-                with st.expander(f"{emoji} {al.get('source_name','Unknown')} — {astatus}"):
-                    ec1, ec2 = st.columns(2)
-                    with ec1:
-                        if src_info is not None:
-                            st.markdown(f"**Type:** {src_info.get('source_type','—')}")
-                            st.markdown(f"**State:** {src_info.get('state','—')}")
-                            st.markdown(f"**District:** {src_info.get('district','—')}")
-                        cap_v = float(al.get("capacity_percent",0) or 0)
-                        st.markdown(f"**Capacity:** {cap_v:.1f}%")
-                        st.progress(cap_v/100 if cap_v>0 else 0)
-                    with ec2:
-                        st.markdown(f"**pH Level:** {al.get('ph_level','—')}")
-                        st.markdown(f"**Alert Time:** {al.get('alert_time','—')}")
-                        if astatus=="CRITICAL":
-                            st.error("⚠️ Immediate inspection required")
-                        elif astatus=="WARNING":
-                            st.warning("🔧 Schedule maintenance soon")
-                        else:
-                            st.success("✅ Monitor routinely")
+            severity_order = {'CRITICAL': 0, 'WARNING': 1, 'STABLE': 2}
+            filtered_alerts['severity'] = filtered_alerts['alert_status'].map(severity_order)
+            filtered_alerts = filtered_alerts.sort_values('severity').drop('severity', axis=1)
+            
+            for _, alert in filtered_alerts.iterrows():
+                alert_status = alert.get('alert_status', 'STABLE')
+                if alert_status == 'CRITICAL':
+                    status_emoji, border_color = "🔴", "#ff4444"
+                elif alert_status == 'WARNING':
+                    status_emoji, border_color = "🟡", "#ffd700"
+                else:
+                    status_emoji, border_color = "🟢", "#00ff9d"
+                
+                source_name = alert.get('source_name', 'Unknown')
+                source_type = alert.get('source_type', 'Unknown')
+                location = f"{alert.get('district', 'Unknown')}, {alert.get('state', 'Unknown')}"
+                capacity = alert.get('capacity_percent', 0)
+                ph = alert.get('ph_level', 'N/A')
+                alert_time = alert.get('alert_time', 'N/A')
+                if isinstance(alert_time, pd.Timestamp):
+                    alert_time = alert_time.strftime('%Y-%m-%d %H:%M:%S')
+                
+                reasons = []
+                if capacity < 30:
+                    reasons.append(f"Critical capacity: {capacity}%")
+                elif capacity < 60:
+                    reasons.append(f"Low capacity: {capacity}%")
+                if ph != 'N/A' and pd.notna(ph):
+                    if ph < 6.5:
+                        reasons.append(f"pH too low: {ph}")
+                    elif ph > 8.5:
+                        reasons.append(f"pH too high: {ph}")
+                reason = " | ".join(reasons) if reasons else "Monitoring alert - Routine check"
+                
+                with st.expander(f"{status_emoji} {source_name} - {alert_status}", expanded=(alert_status == 'CRITICAL')):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Type:** {source_type}")
+                        st.markdown(f"**Location:** {location}")
+                        st.markdown(f"**Capacity:** {capacity}%")
+                        st.progress(capacity/100 if capacity > 0 else 0)
+                    with col2:
+                        st.markdown(f"**pH Level:** {ph}")
+                        st.markdown(f"**Time:** {alert_time}")
+                        st.markdown(f"**Status:** :{'red' if alert_status=='CRITICAL' else ('orange' if alert_status=='WARNING' else 'green')}[{alert_status}]")
+                    st.markdown(f"**Alert Reason:** {reason}")
+                    if alert_status == 'CRITICAL':
+                        st.warning("⚠️ **Immediate Action Required** - Schedule emergency inspection")
+                    elif alert_status == 'WARNING':
+                        st.info("📋 **Action Required** - Schedule maintenance within 7 days")
+                    else:
+                        st.success("✅ **Normal Operations** - Routine monitoring only")
     else:
-        st.success("✅ No active alerts — All systems nominal")
+        st.success("✅ No active alerts - All systems normal")
         st.balloons()
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 6 — DATA TABLES  (ALL filters applied consistently)
-# ══════════════════════════════════════════════════════════════════════════════
+# ===================== TAB 6: DATA TABLES =====================
 with tab6:
     st.markdown('<p class="sec-hdr">📋 Data Explorer</p>', unsafe_allow_html=True)
-
-    table_choice = st.selectbox("Select Table", [
-        "Water Sources", "Monitoring Stations", "Groundwater Levels",
-        "Rainfall History", "Water Usage", "Water Quality", "Active Alerts", "Regional Statistics",
-    ])
-
+    
+    table_choice = st.selectbox("Select Table to View", ["Water Sources", "Monitoring Stations", "Groundwater Levels", 
+                                                         "Rainfall History", "Water Usage", "Active Alerts", "Regional Statistics"])
+    
     def dl_btn(df, prefix):
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("📥 Download CSV", csv,
@@ -1093,112 +1009,60 @@ with tab6:
 
     def show_table(df, cols):
         avail = [c for c in cols if c in df.columns]
-        out   = df[avail].reset_index(drop=True) if avail else df.reset_index(drop=True)
-        st.caption(f"Showing {len(out):,} records matching current filters")
+        out = df[avail].reset_index(drop=True) if avail else df.reset_index(drop=True)
         st.dataframe(out, use_container_width=True, hide_index=True)
-        dl_btn(out, prefix=cols[0] if cols else "export")
-
-    # ── Water Sources: use filtered_sources directly ─────────────────────────
+        dl_btn(out, cols[0] if cols else "export")
+    
     if table_choice == "Water Sources":
         df = filtered_sources if not filtered_sources.empty else sources
         if not df.empty:
-            show_table(df, ["source_id","source_name","source_type","capacity_percent",
-                            "max_capacity_mcm","build_year","age","state","district",
-                            "origin_state","is_transboundary","risk_level","health_score","trend"])
-        else:
-            st.info("No data matches current filters.")
-
-    # ── Monitoring Stations: use filtered_stations directly ──────────────────
+            show_table(df, ["source_id","source_name","source_type","capacity_percent","max_capacity_mcm",
+                           "build_year","age","state","district","origin_state","is_transboundary","risk_level","health_score"])
+    
     elif table_choice == "Monitoring Stations":
         df = filtered_stations if not filtered_stations.empty else stations
         if not df.empty:
-            show_table(df, ["station_id","station_name","state_name","district_name",
-                            "latitude","longitude","ph_level","dissolved_oxygen_mg_l",
-                            "turbidity_ntu","status","last_maintenance"])
-        else:
-            st.info("No data matches current filters.")
-
-    # ── Groundwater Levels: filter by districts from filtered_sources ────────
+            show_table(df, ["station_id","station_name","state_name","district_name","latitude","longitude",
+                           "ph_level","dissolved_oxygen_mg_l","turbidity_ntu","status"])
+    
     elif table_choice == "Groundwater Levels":
         df = groundwater.copy()
-        if "district_name" in df.columns:
-            if filtered_districts:
-                # If any geo filter is active, restrict to those districts
-                df = df[df["district_name"].isin(filtered_districts)]
-            elif selected_state == "All States" and selected_district == "All Districts":
-                pass  # no filter — show all
+        if filtered_districts and "district_name" in df.columns:
+            df = df[df["district_name"].isin(filtered_districts)]
         if not df.empty:
-            show_table(df, ["id","district_name","avg_depth_meters","extraction_pct",
-                            "recharge_rate_mcm","assessment_year","stress_level","depletion_rate"])
-        else:
-            st.info("No groundwater data matches current filters.")
-
-    # ── Rainfall History: filter by districts + rainfall cm range ────────────
+            show_table(df, ["district_name","avg_depth_meters","extraction_pct","recharge_rate_mcm",
+                           "assessment_year","stress_level"])
+    
     elif table_choice == "Rainfall History":
         df = rainfall.copy()
-        if "district_name" in df.columns:
-            if filtered_districts:
-                df = df[df["district_name"].isin(filtered_districts)]
+        if filtered_districts and "district_name" in df.columns:
+            df = df[df["district_name"].isin(filtered_districts)]
         if "rainfall_cm" in df.columns:
             df = df[df["rainfall_cm"].between(rainfall_range[0], rainfall_range[1])]
         if not df.empty:
-            show_table(df, ["id","district_name","rainfall_cm","record_year","season",
-                            "rainfall_category","deviation_pct"])
-        else:
-            st.info("No rainfall data matches current filters.")
-
-    # ── Water Usage: filter by state and district ────────────────────────────
+            show_table(df, ["district_name","rainfall_cm","record_year","season","rainfall_category"])
+    
     elif table_choice == "Water Usage":
         df = usage.copy()
-        if selected_state    != "All States"    and "state"    in df.columns:
+        if selected_state != "All States" and "state" in df.columns:
             df = df[df["state"] == selected_state]
         if selected_district != "All Districts" and "district" in df.columns:
             df = df[df["district"] == selected_district]
         if not df.empty:
-            show_table(df, ["usage_id","source_name","source_type","sector","sub_sector",
-                            "consumer_name","consumption_mcm","record_year","season","state","district"])
-        else:
-            st.info("No usage data matches current filters.")
-
-    # ── Water Quality: filter by state and district ──────────────────────────
-    elif table_choice == "Water Quality":
-        df = water_quality.copy()
-        if selected_state    != "All States"    and "state_name"    in df.columns:
-            df = df[df["state_name"] == selected_state]
-        if selected_district != "All Districts" and "district_name" in df.columns:
-            df = df[df["district_name"] == selected_district]
-        if not df.empty:
-            show_table(df, ["station_name","state_name","district_name","ph_level",
-                            "dissolved_oxygen_mg_l","turbidity_ntu","status"])
-        else:
-            st.info("No water quality data matches current filters.")
-
-    # ── Active Alerts: filter via source_name intersection ───────────────────
+            show_table(df, ["source_name","source_type","sector","sub_sector","consumer_name",
+                           "consumption_mcm","record_year","season","state","district"])
+    
     elif table_choice == "Active Alerts":
         df = alerts.copy()
-        if (not filtered_sources.empty
-                and "source_name" in filtered_sources.columns
-                and "source_name" in df.columns
-                and (selected_state != "All States" or selected_district != "All Districts")):
-            valid = filtered_sources["source_name"].dropna().unique().tolist()
-            df = df[df["source_name"].isin(valid)]
         if not df.empty:
-            show_table(df, ["alert_id","source_name","capacity_percent","ph_level",
-                            "alert_status","alert_time"])
-        else:
-            st.info("No alerts match current filters.")
-
-    # ── Regional Statistics: no geo filter (region-level) ────────────────────
+            show_table(df, ["alert_id","source_name","capacity_percent","ph_level","alert_status","alert_time"])
+    
     elif table_choice == "Regional Statistics":
         df = regional.copy()
         if not df.empty:
-            show_table(df, ["region_id","region_name","population_count","annual_rainfall_avg_cm"])
-        else:
-            st.info("No regional statistics available.")
+            show_table(df, ["region_name","population_count","annual_rainfall_avg_cm"])
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — FILTER SUMMARY & EXPORT
-# ─────────────────────────────────────────────────────────────────────────────
+# ===================== SIDEBAR SUMMARY =====================
 with st.sidebar.expander("📊 Filter Summary", expanded=False):
     st.markdown(f"""
 **Geography:**
@@ -1218,32 +1082,32 @@ with st.sidebar.expander("📊 Filter Summary", expanded=False):
 **Results:**
 - Sources: `{len(filtered_sources)}` of `{len(sources)}`
 - On Map: `{on_map_n}`
-- GW districts matched: `{len(filtered_districts)}`
 """)
 
+# ===================== EXPORT =====================
 st.sidebar.markdown("---")
 if st.sidebar.button("📦 Export All Filtered Data", use_container_width=True):
     exp_gw = groundwater.copy()
     if filtered_districts and "district_name" in exp_gw.columns:
         exp_gw = exp_gw[exp_gw["district_name"].isin(filtered_districts)]
-
+    
     exp_rain = rainfall.copy()
     if filtered_districts and "district_name" in exp_rain.columns:
         exp_rain = exp_rain[exp_rain["district_name"].isin(filtered_districts)]
-
+    
     exp_wq = water_quality.copy()
-    if selected_state    != "All States"    and "state_name"    in exp_wq.columns:
+    if selected_state != "All States" and "state_name" in exp_wq.columns:
         exp_wq = exp_wq[exp_wq["state_name"] == selected_state]
     if selected_district != "All Districts" and "district_name" in exp_wq.columns:
         exp_wq = exp_wq[exp_wq["district_name"] == selected_district]
-
+    
     export_dict = {
-        "water_sources":       filtered_sources,
+        "water_sources": filtered_sources,
         "monitoring_stations": filtered_stations,
-        "groundwater":         exp_gw,
-        "rainfall":            exp_rain,
-        "water_quality":       exp_wq,
-        "alerts":              alerts if not alerts.empty else pd.DataFrame(),
+        "groundwater": exp_gw,
+        "rainfall": exp_rain,
+        "water_quality": exp_wq,
+        "alerts": alerts if not alerts.empty else pd.DataFrame(),
     }
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -1256,9 +1120,7 @@ if st.sidebar.button("📦 Export All Filtered Data", use_container_width=True):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FOOTER
-# ─────────────────────────────────────────────────────────────────────────────
+# ===================== FOOTER =====================
 st.markdown("---")
 f1, f2, f3 = st.columns(3)
 f1.markdown(
