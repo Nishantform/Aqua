@@ -94,6 +94,9 @@ def execute_query(query, params=None):
     try:
         with engine.connect() as conn:
             if params:
+                # Convert params to tuple if it's a list
+                if isinstance(params, list):
+                    params = tuple(params)
                 return pd.read_sql(query, conn, params=params)
             else:
                 return pd.read_sql(query, conn)
@@ -103,46 +106,48 @@ def execute_query(query, params=None):
 
 def get_demo_data(query):
     """Return demo data based on query type"""
+    np.random.seed(42)
+    
     if "water_sources" in query.lower():
         return pd.DataFrame({
-            'source_name': ['River A', 'Reservoir B', 'Lake C', 'Well D', 'Canal E', 'River F', 'Reservoir G', 'Lake H'],
-            'source_type': ['River', 'Reservoir', 'Lake', 'Well', 'Canal', 'River', 'Reservoir', 'Lake'],
-            'state': ['State A', 'State A', 'State B', 'State B', 'State C', 'State C', 'State A', 'State B'],
-            'district': ['North', 'South', 'East', 'West', 'Central', 'North', 'South', 'East'],
-            'capacity_percent': [85, 45, 28, 72, 54, 91, 38, 62],
-            'latitude': [28.61, 22.57, 19.08, 12.97, 26.91, 28.65, 22.60, 19.10],
-            'longitude': [77.21, 88.36, 72.88, 77.59, 75.79, 77.25, 88.40, 72.92],
-            'risk_level': ['Good', 'Moderate', 'Critical', 'Good', 'Moderate', 'Good', 'Moderate', 'Good']
+            'source_name': [f'Source_{i}' for i in range(1, 21)],
+            'source_type': np.random.choice(['River', 'Reservoir', 'Lake', 'Well', 'Canal'], 20),
+            'state': np.random.choice(['State A', 'State B', 'State C', 'State D'], 20),
+            'district': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 20),
+            'capacity_percent': np.random.randint(20, 100, 20),
+            'latitude': np.random.uniform(8, 37, 20),
+            'longitude': np.random.uniform(68, 97, 20),
+            'risk_level': np.random.choice(['Critical', 'Moderate', 'Good'], 20)
         })
     elif "rainfall" in query.lower():
         return pd.DataFrame({
-            'district_name': ['North', 'South', 'East', 'West', 'Central', 'North', 'South', 'East'],
-            'rainfall_cm': [145, 98, 210, 78, 167, 132, 112, 198],
-            'record_year': [2024, 2024, 2024, 2024, 2024, 2023, 2023, 2023],
-            'season': ['Monsoon', 'Monsoon', 'Monsoon', 'Monsoon', 'Monsoon', 'Monsoon', 'Monsoon', 'Monsoon'],
-            'rainfall_category': ['High', 'Moderate', 'Extreme', 'Low', 'High', 'High', 'Moderate', 'Extreme']
+            'district_name': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 50),
+            'rainfall_cm': np.random.uniform(20, 350, 50),
+            'record_year': np.random.choice([2020, 2021, 2022, 2023, 2024], 50),
+            'season': np.random.choice(['Winter', 'Summer', 'Monsoon', 'Post-Monsoon'], 50),
+            'rainfall_category': np.random.choice(['Low', 'Moderate', 'High', 'Extreme'], 50)
         })
     elif "groundwater" in query.lower():
         return pd.DataFrame({
-            'district_name': ['North', 'South', 'East', 'West', 'Central', 'North', 'South', 'East'],
-            'avg_depth_meters': [35, 28, 42, 22, 31, 33, 26, 40],
-            'extraction_pct': [72, 58, 81, 45, 63, 70, 55, 78],
-            'recharge_rate_mcm': [250, 320, 180, 400, 290, 260, 310, 190],
-            'assessment_year': [2024, 2024, 2024, 2024, 2024, 2023, 2023, 2023],
-            'stress_level': ['High', 'Moderate', 'Critical', 'Low', 'Moderate', 'High', 'Moderate', 'Critical']
+            'district_name': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 40),
+            'avg_depth_meters': np.random.uniform(15, 55, 40),
+            'extraction_pct': np.random.uniform(35, 85, 40),
+            'recharge_rate_mcm': np.random.uniform(150, 450, 40),
+            'assessment_year': np.random.choice([2020, 2021, 2022, 2023, 2024], 40),
+            'stress_level': np.random.choice(['Low', 'Moderate', 'High', 'Critical'], 40)
         })
     elif "water_monitoring" in query.lower():
         return pd.DataFrame({
-            'station_name': ['Stn A', 'Stn B', 'Stn C', 'Stn D', 'Stn E'],
-            'state_name': ['State A', 'State A', 'State B', 'State B', 'State C'],
-            'district_name': ['North', 'South', 'East', 'West', 'Central'],
-            'ph_level': [7.2, 7.5, 6.8, 7.8, 7.1],
-            'dissolved_oxygen_mg_l': [6.8, 7.2, 5.9, 7.5, 6.5],
-            'turbidity_ntu': [4.2, 3.8, 12.5, 2.9, 5.6],
-            'status': ['Active', 'Active', 'Maintenance', 'Active', 'Active']
+            'station_name': [f'Station_{i}' for i in range(1, 16)],
+            'state_name': np.random.choice(['State A', 'State B', 'State C', 'State D'], 15),
+            'district_name': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 15),
+            'ph_level': np.random.uniform(6.2, 8.8, 15),
+            'dissolved_oxygen_mg_l': np.random.uniform(3.5, 8.5, 15),
+            'turbidity_ntu': np.random.uniform(1, 25, 15),
+            'status': np.random.choice(['Active', 'Maintenance', 'Inactive'], 15, p=[0.7, 0.2, 0.1])
         })
     else:
-        return pd.DataFrame({'message': ['Demo data']})
+        return pd.DataFrame({'message': ['Demo data - Connect to database for live data']})
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SQL QUERIES FOR EACH FILTER TYPE (AUTOMATIC)
@@ -164,8 +169,7 @@ def get_water_sources_query(state=None, district=None, source_type=None, min_cap
         params.append(source_type)
     if min_cap > 0 or max_cap < 100:
         query += " AND capacity_percent BETWEEN %s AND %s"
-        params.append(min_cap)
-        params.append(max_cap)
+        params.extend([min_cap, max_cap])
     if risk and risk != "All Risk Levels":
         query += " AND risk_level = %s"
         params.append(risk)
@@ -189,8 +193,7 @@ def get_rainfall_query(district=None, year=None, season=None, min_rain=0, max_ra
         params.append(season)
     if min_rain > 0 or max_rain < 500:
         query += " AND rainfall_cm BETWEEN %s AND %s"
-        params.append(min_rain)
-        params.append(max_rain)
+        params.extend([min_rain, max_rain])
     if category and category != "All Categories":
         query += " AND rainfall_category = %s"
         params.append(category)
@@ -211,19 +214,16 @@ def get_groundwater_query(district=None, year=None, min_depth=0, max_depth=100, 
         params.append(year)
     if min_depth > 0 or max_depth < 100:
         query += " AND avg_depth_meters BETWEEN %s AND %s"
-        params.append(min_depth)
-        params.append(max_depth)
+        params.extend([min_depth, max_depth])
     if stress and stress != "All Levels":
         query += " AND stress_level = %s"
         params.append(stress)
     if min_ext > 0 or max_ext < 100:
         query += " AND extraction_pct BETWEEN %s AND %s"
-        params.append(min_ext)
-        params.append(max_ext)
+        params.extend([min_ext, max_ext])
     if min_recharge > 0 or max_recharge < 1000:
         query += " AND recharge_rate_mcm BETWEEN %s AND %s"
-        params.append(min_recharge)
-        params.append(max_recharge)
+        params.extend([min_recharge, max_recharge])
     
     query += " ORDER BY assessment_year DESC, avg_depth_meters DESC"
     return query, params
@@ -241,16 +241,13 @@ def get_water_quality_query(state=None, district=None, min_ph=0, max_ph=14, min_
         params.append(district)
     if min_ph > 0 or max_ph < 14:
         query += " AND ph_level BETWEEN %s AND %s"
-        params.append(min_ph)
-        params.append(max_ph)
+        params.extend([min_ph, max_ph])
     if min_do > 0 or max_do < 15:
         query += " AND dissolved_oxygen_mg_l BETWEEN %s AND %s"
-        params.append(min_do)
-        params.append(max_do)
+        params.extend([min_do, max_do])
     if min_turb > 0 or max_turb < 100:
         query += " AND turbidity_ntu BETWEEN %s AND %s"
-        params.append(min_turb)
-        params.append(max_turb)
+        params.extend([min_turb, max_turb])
     if status and status != "All Status":
         query += " AND status = %s"
         params.append(status)
@@ -299,17 +296,6 @@ def get_groundwater_trend_query(district=None, start_year=2020, end_year=2024):
     query += " GROUP BY assessment_year ORDER BY assessment_year"
     return query, params
 
-def get_correlation_query():
-    """Get correlation between different parameters"""
-    return """
-        SELECT 
-            'Rainfall vs Groundwater' as correlation_pair,
-            CORR(r.rainfall_cm, g.avg_depth_meters) as correlation_value
-        FROM rainfall_history r
-        JOIN groundwater_levels g ON r.district_name = g.district_name
-        WHERE r.record_year = g.assessment_year
-    """
-
 def get_alert_query(sensitivity='Medium'):
     """Get alerts based on sensitivity"""
     threshold = {'Low': 50, 'Medium': 60, 'High': 70, 'Critical': 80}
@@ -330,7 +316,7 @@ def get_alert_query(sensitivity='Medium'):
         WHERE capacity_percent < {thresh}
         ORDER BY capacity_percent
         LIMIT 20
-    """
+    """, []
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INITIALIZE SESSION STATE FOR FILTERS
@@ -354,8 +340,6 @@ with st.sidebar:
     
     if st.button("🔄 Reset All Filters", use_container_width=True):
         st.cache_data.clear()
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
         st.rerun()
     
     st.markdown("---")
@@ -446,8 +430,6 @@ with st.sidebar:
         with col2:
             end_year = st.selectbox("End Year", [2020, 2021, 2022, 2023, 2024], index=4, key="end_year")
         
-        min_data_points = st.slider("Min Data Points per District", 3, 20, 5, key="min_data")
-        correlation_type = st.selectbox("Correlation Type", ["Rainfall vs Groundwater", "Capacity vs Extraction", "pH vs DO"], key="corr_type")
         alert_sensitivity = st.select_slider("Alert Sensitivity", options=["Low", "Medium", "High", "Critical"], value="Medium", key="alert_sens")
     
     # ========== SECTION 6: MAP SETTINGS ==========
@@ -492,18 +474,14 @@ st.session_state.water_quality_data = execute_query(wq_query, wq_params if wq_pa
 
 # Execute Trend Queries for Analytics
 rain_trend_query, rain_trend_params = get_rainfall_trend_query(rain_district, start_year, end_year)
-st.session_state.rain_trend = execute_query(rain_trend_query, rain_trend_params)
+st.session_state.rain_trend = execute_query(rain_trend_query, rain_trend_params if rain_trend_params else None)
 
 gw_trend_query, gw_trend_params = get_groundwater_trend_query(gw_district, start_year, end_year)
-st.session_state.gw_trend = execute_query(gw_trend_query, gw_trend_params)
-
-# Execute Correlation Query
-corr_query = get_correlation_query()
-st.session_state.correlation = execute_query(corr_query)
+st.session_state.gw_trend = execute_query(gw_trend_query, gw_trend_params if gw_trend_params else None)
 
 # Execute Alert Query
-alert_query = get_alert_query(alert_sensitivity)
-st.session_state.alerts = execute_query(alert_query)
+alert_query, alert_params = get_alert_query(alert_sensitivity)
+st.session_state.alerts = execute_query(alert_query, alert_params if alert_params else None)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN CONTENT - HEADER & KPIs
@@ -517,7 +495,6 @@ st.markdown(f"<p>National Water Command Center • Live Intelligence • {curren
 sources_df = st.session_state.sources_data
 rainfall_df = st.session_state.rainfall_data
 gw_df = st.session_state.groundwater_data
-wq_df = st.session_state.water_quality_data
 
 total_sources = len(sources_df) if sources_df is not None else 0
 avg_capacity = sources_df['capacity_percent'].mean() if sources_df is not None and not sources_df.empty else 0
@@ -547,33 +524,40 @@ with tab1:
         st.markdown("### 🏭 Water Sources by Type")
         if sources_df is not None and not sources_df.empty and 'source_type' in sources_df.columns:
             type_counts = sources_df['source_type'].value_counts()
-            fig = px.pie(values=type_counts.values, names=type_counts.index, title="Source Distribution")
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
-            st.plotly_chart(fig, use_container_width=True)
+            if not type_counts.empty:
+                fig = px.pie(values=type_counts.values, names=type_counts.index, title="Source Distribution")
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                fig.update_layout(font=dict(color='#cfe4f7'))
+                st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("### 📈 Capacity Distribution")
         if sources_df is not None and not sources_df.empty and 'capacity_percent' in sources_df.columns:
             fig = px.histogram(sources_df, x='capacity_percent', nbins=20, title="Capacity Distribution")
             fig.add_vline(x=30, line_dash="dash", line_color="red")
             fig.add_vline(x=60, line_dash="dash", line_color="orange")
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         st.markdown("### ⚠️ Risk Assessment")
         if sources_df is not None and not sources_df.empty and 'risk_level' in sources_df.columns:
             risk_counts = sources_df['risk_level'].value_counts()
-            colors = {'Critical': '#ff4444', 'Moderate': '#ffd700', 'Good': '#00ff9d'}
-            fig = px.bar(x=risk_counts.index, y=risk_counts.values, title="Risk Distribution", color=risk_counts.index, color_discrete_map=colors)
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
-            st.plotly_chart(fig, use_container_width=True)
+            if not risk_counts.empty:
+                colors = {'Critical': '#ff4444', 'Moderate': '#ffd700', 'Good': '#00ff9d'}
+                fig = px.bar(x=risk_counts.index, y=risk_counts.values, title="Risk Distribution", color=risk_counts.index, color_discrete_map=colors)
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                fig.update_layout(font=dict(color='#cfe4f7'))
+                st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("### 🏆 Top Sources by Capacity")
-        if sources_df is not None and not sources_df.empty:
+        if sources_df is not None and not sources_df.empty and 'capacity_percent' in sources_df.columns:
             top_sources = sources_df.nlargest(5, 'capacity_percent')[['source_name', 'capacity_percent']]
-            fig = px.bar(top_sources, x='capacity_percent', y='source_name', orientation='h', title="Top 5 Sources")
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
-            st.plotly_chart(fig, use_container_width=True)
+            if not top_sources.empty:
+                fig = px.bar(top_sources, x='capacity_percent', y='source_name', orientation='h', title="Top 5 Sources")
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                fig.update_layout(font=dict(color='#cfe4f7'))
+                st.plotly_chart(fig, use_container_width=True)
     
     st.markdown("### 📋 Filtered Data")
     if sources_df is not None and not sources_df.empty:
@@ -624,39 +608,44 @@ with tab3:
         st.markdown("### 🌧️ Rainfall Trend")
         if st.session_state.rain_trend is not None and not st.session_state.rain_trend.empty:
             fig = px.line(st.session_state.rain_trend, x='record_year', y='avg_rainfall', title="Average Rainfall Over Years", markers=True)
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("### 🌊 Groundwater Trend")
         if st.session_state.gw_trend is not None and not st.session_state.gw_trend.empty:
             fig = px.line(st.session_state.gw_trend, x='assessment_year', y='avg_depth', title="Groundwater Depth Trend", markers=True)
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         st.markdown("### 💧 Seasonal Rainfall Pattern")
         if rainfall_df is not None and not rainfall_df.empty and 'season' in rainfall_df.columns:
             seasonal = rainfall_df.groupby('season')['rainfall_cm'].mean().reset_index()
-            fig = px.bar(seasonal, x='season', y='rainfall_cm', title="Average Rainfall by Season")
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
-            st.plotly_chart(fig, use_container_width=True)
+            if not seasonal.empty:
+                fig = px.bar(seasonal, x='season', y='rainfall_cm', title="Average Rainfall by Season")
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                fig.update_layout(font=dict(color='#cfe4f7'))
+                st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("### 🔄 Extraction vs Recharge")
-        if gw_df is not None and not gw_df.empty:
+        if gw_df is not None and not gw_df.empty and 'district_name' in gw_df.columns:
             top_gw = gw_df.head(10)
-            fig = go.Figure()
-            fig.add_trace(go.Bar(name='Extraction %', x=top_gw['district_name'], y=top_gw['extraction_pct'], marker_color='#ff4444'))
-            fig.add_trace(go.Bar(name='Recharge Rate', x=top_gw['district_name'], y=top_gw['recharge_rate_mcm']/5, marker_color='#00ff9d'))
-            fig.update_layout(title="Extraction vs Recharge by District", barmode='group', bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
-            st.plotly_chart(fig, use_container_width=True)
-    
-    st.markdown("### 📊 Correlation Analysis")
-    if st.session_state.correlation is not None and not st.session_state.correlation.empty:
-        st.dataframe(st.session_state.correlation, use_container_width=True)
+            if not top_gw.empty:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(name='Extraction %', x=top_gw['district_name'], y=top_gw['extraction_pct'], marker_color='#ff4444'))
+                fig.add_trace(go.Bar(name='Recharge Rate (scaled)', x=top_gw['district_name'], y=top_gw['recharge_rate_mcm']/5, marker_color='#00ff9d'))
+                fig.update_layout(title="Extraction vs Recharge by District", barmode='group')
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                fig.update_layout(font=dict(color='#cfe4f7'))
+                st.plotly_chart(fig, use_container_width=True)
 
 # ========== TAB 4: WATER QUALITY ==========
 with tab4:
     st.subheader("💧 Water Quality Monitoring")
+    
+    wq_df = st.session_state.water_quality_data
     
     if wq_df is not None and not wq_df.empty:
         col1, col2, col3 = st.columns(3)
@@ -673,7 +662,8 @@ with tab4:
             fig = px.histogram(wq_df, x='ph_level', nbins=15, title="pH Distribution")
             fig.add_vline(x=6.5, line_dash="dash", line_color="green")
             fig.add_vline(x=8.5, line_dash="dash", line_color="green")
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("### 📋 Water Quality Data")
@@ -685,16 +675,18 @@ with tab4:
 with tab5:
     st.subheader("⚠️ Active Alerts")
     
-    if st.session_state.alerts is not None and not st.session_state.alerts.empty:
-        critical = len(st.session_state.alerts[st.session_state.alerts['alert_level'] == 'CRITICAL_ALERT']) if 'alert_level' in st.session_state.alerts.columns else 0
-        warning = len(st.session_state.alerts[st.session_state.alerts['alert_level'] == 'WARNING']) if 'alert_level' in st.session_state.alerts.columns else 0
+    alerts_df = st.session_state.alerts
+    
+    if alerts_df is not None and not alerts_df.empty:
+        critical = len(alerts_df[alerts_df['alert_level'] == 'CRITICAL_ALERT']) if 'alert_level' in alerts_df.columns else 0
+        warning = len(alerts_df[alerts_df['alert_level'] == 'WARNING']) if 'alert_level' in alerts_df.columns else 0
         
         col1, col2 = st.columns(2)
         col1.markdown(f"<div class='badge-critical'>🔴 CRITICAL: {critical}</div>", unsafe_allow_html=True)
         col2.markdown(f"<div class='badge-warning'>🟡 WARNING: {warning}</div>", unsafe_allow_html=True)
         
         st.markdown("### 📋 Alert Details")
-        st.dataframe(st.session_state.alerts, use_container_width=True)
+        st.dataframe(alerts_df, use_container_width=True)
     else:
         st.success("✅ No active alerts at this time")
 
