@@ -88,6 +88,14 @@ html, body, [data-testid="stAppViewContainer"] {
     overflow-x: auto;
     white-space: pre-wrap;
 }
+.filter-container {
+    background: rgba(10,30,48,0.6);
+    border: 1px solid rgba(0,200,255,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    backdrop-filter: blur(10px);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -444,37 +452,89 @@ if not rainfall.empty and "rainfall_cm" in rainfall.columns:
     rainfall["rainfall_category"] = pd.cut(rainfall["rainfall_cm"], bins=[0, 50, 150, 300, float("inf")], labels=["Low", "Moderate", "High", "Extreme"])
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR FILTERS
+# UNIFIED FILTER SYSTEM
+# ─────────────────────────────────────────────────────────────────────────────
+def apply_unified_filters():
+    """Apply filters based on selected filter type"""
+    global filtered_rainfall, filtered_groundwater, filtered_water_quality, filtered_sources_capacity
+    
+    filter_type = st.session_state.get("filter_type", "🌧️ Rainfall Filter")
+    
+    if filter_type == "🌧️ Rainfall Filter":
+        query, params = get_rainfall_filter_query(
+            district_name=st.session_state.get("rain_district", None) if st.session_state.get("rain_district") != "All Districts" else None,
+            min_rainfall=st.session_state.get("min_rainfall", None) if st.session_state.get("min_rainfall", 0) > 0 else None,
+            max_rainfall=st.session_state.get("max_rainfall", None) if st.session_state.get("max_rainfall", 500) < 500 else None,
+            year=st.session_state.get("rain_year", None) if st.session_state.get("rain_year") != "All" else None,
+            season=st.session_state.get("season", None) if st.session_state.get("season") != "All" else None,
+            rainfall_category=st.session_state.get("rain_category", None) if st.session_state.get("rain_category") != "All" else None
+        )
+        filtered_rainfall, error = execute_sql_query(query, params)
+        if error:
+            st.error(f"Rainfall filter error: {error}")
+            filtered_rainfall = pd.DataFrame()
+    
+    elif filter_type == "🌊 Groundwater Filter":
+        query, params = get_groundwater_filter_query(
+            district_name=st.session_state.get("gw_district", None) if st.session_state.get("gw_district") != "All Districts" else None,
+            min_depth=st.session_state.get("min_depth", None) if st.session_state.get("min_depth", 0) > 0 else None,
+            max_depth=st.session_state.get("max_depth", None) if st.session_state.get("max_depth", 50) < 50 else None,
+            stress_level=st.session_state.get("stress_level", None) if st.session_state.get("stress_level") != "All" else None,
+            year=st.session_state.get("gw_year", None) if st.session_state.get("gw_year") != "All" else None
+        )
+        filtered_groundwater, error = execute_sql_query(query, params)
+        if error:
+            st.error(f"Groundwater filter error: {error}")
+            filtered_groundwater = pd.DataFrame()
+    
+    elif filter_type == "💧 Water Quality (pH) Filter":
+        query, params = get_water_quality_filter_query(
+            state=st.session_state.get("wq_state", None) if st.session_state.get("wq_state") != "All States" else None,
+            district=st.session_state.get("wq_district", None) if st.session_state.get("wq_district") != "All Districts" else None,
+            min_ph=st.session_state.get("min_ph", None) if st.session_state.get("min_ph", 0) > 0 else None,
+            max_ph=st.session_state.get("max_ph", None) if st.session_state.get("max_ph", 14) < 14 else None,
+            status=st.session_state.get("wq_status", None) if st.session_state.get("wq_status") != "All" else None
+        )
+        filtered_water_quality, error = execute_sql_query(query, params)
+        if error:
+            st.error(f"Water quality filter error: {error}")
+            filtered_water_quality = pd.DataFrame()
+    
+    elif filter_type == "🏭 Source Capacity Filter":
+        if not sources.empty:
+            filtered_sources_capacity = sources.copy()
+            if st.session_state.get("cap_state") != "All States":
+                filtered_sources_capacity = filtered_sources_capacity[filtered_sources_capacity["state"] == st.session_state.get("cap_state")]
+            if st.session_state.get("cap_district") != "All Districts":
+                filtered_sources_capacity = filtered_sources_capacity[filtered_sources_capacity["district"] == st.session_state.get("cap_district")]
+            if st.session_state.get("min_capacity", 0) > 0:
+                filtered_sources_capacity = filtered_sources_capacity[filtered_sources_capacity["capacity_percent"] >= st.session_state.get("min_capacity")]
+            if st.session_state.get("max_capacity", 100) < 100:
+                filtered_sources_capacity = filtered_sources_capacity[filtered_sources_capacity["capacity_percent"] <= st.session_state.get("max_capacity")]
+            if st.session_state.get("risk_level_filter") != "All Risk Levels":
+                filtered_sources_capacity = filtered_sources_capacity[filtered_sources_capacity["risk_level"] == st.session_state.get("risk_level_filter")]
+        else:
+            filtered_sources_capacity = pd.DataFrame()
+
+# Initialize session state for filters
+if "filter_type" not in st.session_state:
+    st.session_state.filter_type = "🌧️ Rainfall Filter"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR FILTERS (Original filters moved to unified section)
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🎮 AQUASTAT")
-    st.caption("Complete SQL Filtering System")
+    st.caption("Advanced Water Management System")
     st.markdown("---")
     
     if st.button("🔄 Reset All Filters", use_container_width=True):
         st.cache_data.clear()
+        # Reset all filter session states
+        for key in st.session_state.keys():
+            if key not in ["filter_type"]:
+                del st.session_state[key]
         st.rerun()
-    
-    st.markdown("---")
-    st.markdown("### 🌍 Geographic Filters")
-    state_opts = ["All States"] + sorted(sources["state"].dropna().unique().tolist()) if not sources.empty and "state" in sources.columns else ["All States"]
-    selected_state = st.selectbox("State", state_opts)
-    
-    dist_opts = ["All Districts"]
-    if not sources.empty and "district" in sources.columns:
-        if selected_state != "All States":
-            dist_opts += sorted(sources[sources["state"] == selected_state]["district"].dropna().unique().tolist())
-        else:
-            dist_opts += sorted(sources["district"].dropna().unique().tolist())
-    selected_district = st.selectbox("District", dist_opts)
-    
-    st.markdown("---")
-    st.markdown("### 💧 Source Filters")
-    type_opts = ["All Types"] + sorted(sources["source_type"].dropna().unique().tolist()) if not sources.empty and "source_type" in sources.columns else ["All Types"]
-    selected_type = st.selectbox("Source Type", type_opts)
-    
-    risk_opts = ["All Risk Levels", "Critical", "Moderate", "Good"]
-    selected_risk = st.selectbox("Risk Level", risk_opts)
     
     st.markdown("---")
     st.markdown("### 🗺️ Map Settings")
@@ -483,19 +543,172 @@ with st.sidebar:
     marker_size = st.slider("Marker Size", 5, 20, 12)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS
+# MAIN FILTER SECTION - UNIFIED LOCATION
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown('<div class="filter-container">', unsafe_allow_html=True)
+st.markdown("### 🔍 Advanced Filter System")
+st.markdown("Select a filter type from the dropdown below to apply specific filters:")
+
+# Filter Type Selection
+filter_type = st.selectbox(
+    "📋 Select Filter Type",
+    options=["🌧️ Rainfall Filter", "🌊 Groundwater Filter", "💧 Water Quality (pH) Filter", "🏭 Source Capacity Filter"],
+    key="filter_type"
+)
+
+st.markdown("---")
+
+# Dynamic Filter Controls based on selection
+if filter_type == "🌧️ Rainfall Filter":
+    st.markdown("#### 🌧️ Rainfall Data Filter")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        districts = rainfall['district_name'].unique().tolist() if 'district_name' in rainfall.columns else []
+        st.selectbox("District", ["All Districts"] + list(districts), key="rain_district")
+        st.number_input("Min Rainfall (cm)", 0.0, 1000.0, 0.0, key="min_rainfall")
+    
+    with col2:
+        st.number_input("Max Rainfall (cm)", 0.0, 1000.0, 500.0, key="max_rainfall")
+        years = rainfall['record_year'].unique().tolist() if 'record_year' in rainfall.columns else []
+        st.selectbox("Year", ["All"] + sorted(years), key="rain_year")
+    
+    with col3:
+        st.selectbox("Season", ["All", "Winter", "Summer", "Monsoon", "Post-Monsoon"], key="season")
+        st.selectbox("Rainfall Category", ["All", "Low", "Moderate", "High", "Extreme"], key="rain_category")
+    
+    if st.button("🔍 Apply Rainfall Filter", use_container_width=True, type="primary"):
+        apply_unified_filters()
+        st.success("✅ Rainfall filter applied!")
+
+elif filter_type == "🌊 Groundwater Filter":
+    st.markdown("#### 🌊 Groundwater Data Filter")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        districts = groundwater['district_name'].unique().tolist() if 'district_name' in groundwater.columns else []
+        st.selectbox("District", ["All Districts"] + list(districts), key="gw_district")
+        st.number_input("Min Depth (m)", 0.0, 100.0, 0.0, key="min_depth")
+    
+    with col2:
+        st.number_input("Max Depth (m)", 0.0, 100.0, 50.0, key="max_depth")
+        st.selectbox("Stress Level", ["All", "Low", "Moderate", "High"], key="stress_level")
+    
+    with col3:
+        years = groundwater['assessment_year'].unique().tolist() if 'assessment_year' in groundwater.columns else []
+        st.selectbox("Assessment Year", ["All"] + sorted(years), key="gw_year")
+    
+    if st.button("🔍 Apply Groundwater Filter", use_container_width=True, type="primary"):
+        apply_unified_filters()
+        st.success("✅ Groundwater filter applied!")
+
+elif filter_type == "💧 Water Quality (pH) Filter":
+    st.markdown("#### 💧 Water Quality & pH Filter")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        states = water_quality['state_name'].unique().tolist() if 'state_name' in water_quality.columns else []
+        st.selectbox("State", ["All States"] + list(states), key="wq_state")
+        st.number_input("Min pH Level", 0.0, 14.0, 0.0, key="min_ph")
+    
+    with col2:
+        districts = water_quality['district_name'].unique().tolist() if 'district_name' in water_quality.columns else []
+        st.selectbox("District", ["All Districts"] + list(districts), key="wq_district")
+        st.number_input("Max pH Level", 0.0, 14.0, 14.0, key="max_ph")
+    
+    with col3:
+        st.selectbox("Station Status", ["All", "Active", "Maintenance", "Inactive"], key="wq_status")
+        st.markdown("**pH Guide:** 6.5-8.5 (Ideal) | 6-9 (Acceptable)")
+    
+    if st.button("🔍 Apply Water Quality Filter", use_container_width=True, type="primary"):
+        apply_unified_filters()
+        st.success("✅ Water quality filter applied!")
+
+elif filter_type == "🏭 Source Capacity Filter":
+    st.markdown("#### 🏭 Water Source Capacity Filter")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        states = sources['state'].unique().tolist() if not sources.empty and 'state' in sources.columns else []
+        st.selectbox("State", ["All States"] + list(states), key="cap_state")
+        st.number_input("Min Capacity (%)", 0, 100, 0, key="min_capacity")
+    
+    with col2:
+        districts = sources['district'].unique().tolist() if not sources.empty and 'district' in sources.columns else []
+        st.selectbox("District", ["All Districts"] + list(districts), key="cap_district")
+        st.number_input("Max Capacity (%)", 0, 100, 100, key="max_capacity")
+    
+    with col3:
+        st.selectbox("Risk Level", ["All Risk Levels", "Critical", "Moderate", "Good"], key="risk_level_filter")
+        st.markdown("**Risk Guide:** <30% Critical | 30-60% Moderate | >60% Good")
+    
+    if st.button("🔍 Apply Source Capacity Filter", use_container_width=True, type="primary"):
+        apply_unified_filters()
+        st.success("✅ Source capacity filter applied!")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Display filter results
+if filter_type == "🌧️ Rainfall Filter" and 'filtered_rainfall' in globals() and not filtered_rainfall.empty:
+    st.markdown("### 📊 Filter Results")
+    st.dataframe(filtered_rainfall, use_container_width=True)
+    st.caption(f"📈 Total records found: {len(filtered_rainfall)}")
+    
+    # Download button
+    csv = filtered_rainfall.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Results", csv, "rainfall_filtered.csv", "text/csv")
+
+elif filter_type == "🌊 Groundwater Filter" and 'filtered_groundwater' in globals() and not filtered_groundwater.empty:
+    st.markdown("### 📊 Filter Results")
+    st.dataframe(filtered_groundwater, use_container_width=True)
+    st.caption(f"📈 Total records found: {len(filtered_groundwater)}")
+    
+    csv = filtered_groundwater.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Results", csv, "groundwater_filtered.csv", "text/csv")
+
+elif filter_type == "💧 Water Quality (pH) Filter" and 'filtered_water_quality' in globals() and not filtered_water_quality.empty:
+    st.markdown("### 📊 Filter Results")
+    st.dataframe(filtered_water_quality, use_container_width=True)
+    st.caption(f"📈 Total records found: {len(filtered_water_quality)}")
+    
+    csv = filtered_water_quality.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Results", csv, "water_quality_filtered.csv", "text/csv")
+
+elif filter_type == "🏭 Source Capacity Filter" and 'filtered_sources_capacity' in globals() and not filtered_sources_capacity.empty:
+    st.markdown("### 📊 Filter Results")
+    st.dataframe(filtered_sources_capacity, use_container_width=True)
+    st.caption(f"📈 Total sources found: {len(filtered_sources_capacity)}")
+    
+    csv = filtered_sources_capacity.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Results", csv, "sources_filtered.csv", "text/csv")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPLY ORIGINAL FILTERS FOR MAP AND DASHBOARD
 # ─────────────────────────────────────────────────────────────────────────────
 def apply_source_filters():
     df = sources.copy()
-    if selected_state != "All States" and "state" in df.columns:
-        df = df[df["state"] == selected_state]
-    if selected_district != "All Districts" and "district" in df.columns:
-        df = df[df["district"] == selected_district]
-    if selected_type != "All Types" and "source_type" in df.columns:
-        df = df[df["source_type"] == selected_type]
-    if selected_risk != "All Risk Levels" and "risk_level" in df.columns:
-        df = df[df["risk_level"] == selected_risk]
+    # Keep original sidebar filters for map
+    if 'selected_state' in st.session_state:
+        if st.session_state.selected_state != "All States" and "state" in df.columns:
+            df = df[df["state"] == st.session_state.selected_state]
+    if 'selected_district' in st.session_state:
+        if st.session_state.selected_district != "All Districts" and "district" in df.columns:
+            df = df[df["district"] == st.session_state.selected_district]
+    if 'selected_type' in st.session_state:
+        if st.session_state.selected_type != "All Types" and "source_type" in df.columns:
+            df = df[df["source_type"] == st.session_state.selected_type]
+    if 'selected_risk' in st.session_state:
+        if st.session_state.selected_risk != "All Risk Levels" and "risk_level" in df.columns:
+            df = df[df["risk_level"] == st.session_state.selected_risk]
     return df
+
+# Initialize sidebar filters if not present
+if "selected_state" not in st.session_state:
+    state_opts = ["All States"] + sorted(sources["state"].dropna().unique().tolist()) if not sources.empty and "state" in sources.columns else ["All States"]
+    st.session_state.selected_state = "All States"
+    st.session_state.selected_district = "All Districts"
+    st.session_state.selected_type = "All Types"
+    st.session_state.selected_risk = "All Risk Levels"
 
 filtered_sources = apply_source_filters()
 filtered_districts = filtered_sources["district"].dropna().unique().tolist() if not filtered_sources.empty and "district" in filtered_sources.columns else []
