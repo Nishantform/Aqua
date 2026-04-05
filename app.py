@@ -88,13 +88,12 @@ html, body, [data-testid="stAppViewContainer"] {
     overflow-x: auto;
     white-space: pre-wrap;
 }
-.filter-container {
-    background: rgba(10,30,48,0.6);
-    border: 1px solid rgba(0,200,255,0.2);
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 20px;
-    backdrop-filter: blur(10px);
+.filter-section {
+    background: rgba(10,30,48,0.4);
+    border: 1px solid rgba(0,200,255,0.15);
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 15px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -110,7 +109,7 @@ except:
 @st.cache_resource
 def init_connection():
     if NEON_URL is None:
-        st.warning("⚠️ Database URL not found in secrets. Using demo mode with sample data.")
+        st.warning("⚠️ Database URL not found. Using demo mode.")
         return None
     try:
         engine = create_engine(NEON_URL, pool_size=5, max_overflow=10, pool_pre_ping=True)
@@ -118,601 +117,66 @@ def init_connection():
             conn.execute(text("SELECT 1")).fetchone()
         return engine
     except Exception as e:
-        st.warning(f"⚠️ Database connection failed: {str(e)[:100]}. Using demo mode.")
+        st.warning(f"⚠️ Database connection failed. Using demo mode.")
         return None
 
 engine = init_connection()
 
 def execute_sql_query(query, params=None):
-    """Execute SQL query with proper error handling and rollback"""
     if engine is None:
-        # Return sample data for demo mode
         return get_sample_data_for_query(query), None
-    
     try:
         with engine.connect() as conn:
-            # Rollback any pending transactions
             conn.rollback()
             if params:
                 result = pd.read_sql(query, conn, params=params)
             else:
                 result = pd.read_sql(query, conn)
         return result, None
-    except exc.OperationalError as e:
-        # Handle connection issues
-        return None, f"Connection error: {str(e)[:100]}"
     except Exception as e:
-        return None, f"Query error: {str(e)[:100]}"
+        return None, str(e)
 
 def get_sample_data_for_query(query):
-    """Return sample data when database is not available"""
+    """Return sample data for demo mode"""
     if "rainfall" in query.lower():
         return pd.DataFrame({
-            'district_name': ['Sample District 1', 'Sample District 2'],
-            'rainfall_cm': [120.5, 85.3],
-            'record_year': [2024, 2024],
-            'season': ['Monsoon', 'Monsoon'],
-            'rainfall_category': ['High', 'Moderate']
+            'district_name': ['North District', 'South District', 'East District', 'West District', 'Central District'],
+            'rainfall_cm': [145.6, 98.3, 210.4, 78.9, 167.2],
+            'record_year': [2024, 2024, 2024, 2024, 2024],
+            'season': ['Monsoon', 'Monsoon', 'Monsoon', 'Monsoon', 'Monsoon'],
+            'rainfall_category': ['High', 'Moderate', 'Extreme', 'Moderate', 'High']
         })
     elif "groundwater" in query.lower():
         return pd.DataFrame({
-            'district_name': ['Sample District 1', 'Sample District 2'],
-            'avg_depth_meters': [25.6, 18.2],
-            'extraction_pct': [65.4, 42.1],
-            'stress_level': ['Moderate', 'Low'],
-            'assessment_year': [2024, 2024]
+            'district_name': ['North District', 'South District', 'East District', 'West District', 'Central District'],
+            'avg_depth_meters': [35.6, 28.2, 42.1, 22.5, 31.8],
+            'extraction_pct': [72.4, 58.3, 81.2, 45.6, 63.5],
+            'stress_level': ['High', 'Moderate', 'Critical', 'Low', 'Moderate'],
+            'assessment_year': [2024, 2024, 2024, 2024, 2024],
+            'recharge_rate_mcm': [250, 320, 180, 400, 290]
         })
-    elif "water" in query.lower() and "quality" in query.lower():
+    elif "water_monitoring" in query.lower():
         return pd.DataFrame({
-            'station_name': ['Station A', 'Station B'],
-            'ph_level': [7.2, 7.5],
-            'dissolved_oxygen_mg_l': [6.8, 7.1],
-            'status': ['Active', 'Active'],
-            'state_name': ['Sample State', 'Sample State']
+            'station_name': ['Station A', 'Station B', 'Station C', 'Station D', 'Station E'],
+            'ph_level': [7.2, 7.5, 6.8, 7.8, 7.1],
+            'dissolved_oxygen_mg_l': [6.8, 7.2, 5.9, 7.5, 6.5],
+            'status': ['Active', 'Active', 'Maintenance', 'Active', 'Active'],
+            'state_name': ['State 1', 'State 1', 'State 2', 'State 2', 'State 1'],
+            'district_name': ['North District', 'South District', 'East District', 'West District', 'Central District'],
+            'turbidity_ntu': [4.2, 3.8, 12.5, 2.9, 5.6]
+        })
+    elif "water_sources" in query.lower():
+        return pd.DataFrame({
+            'source_name': ['River A', 'Reservoir B', 'Lake C', 'Well D', 'Canal E'],
+            'source_type': ['River', 'Reservoir', 'Lake', 'Well', 'Canal'],
+            'state': ['State 1', 'State 1', 'State 2', 'State 2', 'State 1'],
+            'district': ['North District', 'South District', 'East District', 'West District', 'Central District'],
+            'capacity_percent': [85.5, 45.2, 28.6, 72.3, 54.8],
+            'latitude': [28.6139, 22.5726, 19.0760, 12.9716, 26.9124],
+            'longitude': [77.2090, 88.3639, 72.8777, 77.5946, 75.7873]
         })
     else:
-        return pd.DataFrame({'message': ['Demo mode - No data available']})
-
-# ─────────────────────────────────────────────────────────────────────────────
-# EXTENSIVE SQL QUERIES FOR EACH FILTER TYPE
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ========== RAINFALL SQL QUERIES ==========
-RAINFALL_QUERIES = {
-    "basic_filter": """
-        SELECT * FROM rainfall_history 
-        WHERE 1=1
-        {district_filter}
-        {rainfall_range}
-        {year_filter}
-        {season_filter}
-        {category_filter}
-        ORDER BY record_year DESC, rainfall_cm DESC
-    """,
-    
-    "yearly_trend": """
-        SELECT 
-            record_year,
-            COUNT(*) as total_records,
-            ROUND(AVG(rainfall_cm), 2) as avg_rainfall,
-            ROUND(MIN(rainfall_cm), 2) as min_rainfall,
-            ROUND(MAX(rainfall_cm), 2) as max_rainfall,
-            ROUND(STDDEV(rainfall_cm), 2) as std_deviation,
-            ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY rainfall_cm), 2) as median_rainfall
-        FROM rainfall_history
-        WHERE rainfall_cm IS NOT NULL
-        {district_filter}
-        GROUP BY record_year
-        ORDER BY record_year DESC
-    """,
-    
-    "seasonal_analysis": """
-        SELECT 
-            season,
-            COUNT(*) as total_records,
-            ROUND(AVG(rainfall_cm), 2) as avg_rainfall,
-            ROUND(MIN(rainfall_cm), 2) as min_rainfall,
-            ROUND(MAX(rainfall_cm), 2) as max_rainfall,
-            ROUND(STDDEV(rainfall_cm), 2) as std_deviation
-        FROM rainfall_history
-        WHERE season IS NOT NULL AND rainfall_cm IS NOT NULL
-        {district_filter}
-        {year_filter}
-        GROUP BY season
-        ORDER BY avg_rainfall DESC
-    """,
-    
-    "district_comparison": """
-        SELECT 
-            district_name,
-            COUNT(*) as total_records,
-            ROUND(AVG(rainfall_cm), 2) as avg_rainfall,
-            ROUND(SUM(rainfall_cm), 2) as total_rainfall,
-            ROUND(MIN(rainfall_cm), 2) as min_rainfall,
-            ROUND(MAX(rainfall_cm), 2) as max_rainfall,
-            CASE 
-                WHEN AVG(rainfall_cm) > 200 THEN 'Extreme Rainfall'
-                WHEN AVG(rainfall_cm) > 100 THEN 'High Rainfall'
-                WHEN AVG(rainfall_cm) > 50 THEN 'Moderate Rainfall'
-                ELSE 'Low Rainfall'
-            END as rainfall_category
-        FROM rainfall_history
-        WHERE rainfall_cm IS NOT NULL
-        GROUP BY district_name
-        HAVING COUNT(*) > 3
-        ORDER BY avg_rainfall DESC
-        LIMIT 20
-    """,
-    
-    "extreme_events": """
-        SELECT 
-            district_name,
-            record_year,
-            season,
-            rainfall_cm,
-            CASE 
-                WHEN rainfall_cm > 300 THEN 'EXTREME_DANGER'
-                WHEN rainfall_cm > 200 THEN 'SEVERE'
-                WHEN rainfall_cm > 150 THEN 'HEAVY'
-                ELSE 'MODERATE'
-            END as severity_level,
-            RANK() OVER (PARTITION BY district_name ORDER BY rainfall_cm DESC) as rank_within_district
-        FROM rainfall_history
-        WHERE rainfall_cm > 150
-        {district_filter}
-        {year_filter}
-        ORDER BY rainfall_cm DESC
-        LIMIT 50
-    """,
-    
-    "anomaly_detection": """
-        WITH stats AS (
-            SELECT 
-                district_name,
-                AVG(rainfall_cm) as mean_rainfall,
-                STDDEV(rainfall_cm) as std_rainfall
-            FROM rainfall_history
-            GROUP BY district_name
-        )
-        SELECT 
-            rh.district_name,
-            rh.record_year,
-            rh.season,
-            rh.rainfall_cm,
-            s.mean_rainfall,
-            s.std_rainfall,
-            CASE 
-                WHEN rh.rainfall_cm > s.mean_rainfall + 2 * s.std_rainfall THEN 'Extreme_High_Anomaly'
-                WHEN rh.rainfall_cm < s.mean_rainfall - 2 * s.std_rainfall THEN 'Extreme_Low_Anomaly'
-                WHEN rh.rainfall_cm > s.mean_rainfall + s.std_rainfall THEN 'High_Anomaly'
-                WHEN rh.rainfall_cm < s.mean_rainfall - s.std_rainfall THEN 'Low_Anomaly'
-                ELSE 'Normal'
-            END as anomaly_type
-        FROM rainfall_history rh
-        JOIN stats s ON rh.district_name = s.district_name
-        WHERE rh.rainfall_cm IS NOT NULL
-        ORDER BY ABS(rh.rainfall_cm - s.mean_rainfall) DESC
-        LIMIT 30
-    """,
-    
-    "cumulative_analysis": """
-        SELECT 
-            district_name,
-            record_year,
-            season,
-            rainfall_cm,
-            SUM(rainfall_cm) OVER (PARTITION BY district_name, record_year ORDER BY season) as cumulative_rainfall,
-            AVG(rainfall_cm) OVER (PARTITION BY district_name ORDER BY record_year) as moving_avg_rainfall,
-            LAG(rainfall_cm, 1) OVER (PARTITION BY district_name ORDER BY record_year) as previous_year_rainfall,
-            (rainfall_cm - LAG(rainfall_cm, 1) OVER (PARTITION BY district_name ORDER BY record_year)) as yoy_change
-        FROM rainfall_history
-        WHERE rainfall_cm IS NOT NULL
-        {district_filter}
-        ORDER BY district_name, record_year DESC
-        LIMIT 100
-    """
-}
-
-# ========== GROUNDWATER SQL QUERIES ==========
-GROUNDWATER_QUERIES = {
-    "basic_filter": """
-        SELECT * FROM groundwater_levels 
-        WHERE 1=1
-        {district_filter}
-        {depth_range}
-        {stress_filter}
-        {year_filter}
-        ORDER BY assessment_year DESC, avg_depth_meters DESC
-    """,
-    
-    "depletion_rate": """
-        SELECT 
-            district_name,
-            MIN(assessment_year) as first_year,
-            MAX(assessment_year) as last_year,
-            ROUND(AVG(avg_depth_meters), 2) as avg_depth,
-            ROUND(STDDEV(avg_depth_meters), 2) as depth_variability,
-            ROUND((MAX(avg_depth_meters) - MIN(avg_depth_meters)) / 
-                  NULLIF(EXTRACT(YEAR FROM AGE(MAX(assessment_year)::DATE, MIN(assessment_year)::DATE)), 0), 2) as annual_depletion_rate,
-            CASE 
-                WHEN (MAX(avg_depth_meters) - MIN(avg_depth_meters)) > 20 THEN 'CRITICAL_DEPLETION'
-                WHEN (MAX(avg_depth_meters) - MIN(avg_depth_meters)) > 10 THEN 'MODERATE_DEPLETION'
-                ELSE 'STABLE'
-            END as depletion_status
-        FROM groundwater_levels
-        WHERE avg_depth_meters IS NOT NULL
-        GROUP BY district_name
-        HAVING COUNT(*) > 2
-        ORDER BY annual_depletion_rate DESC
-    """,
-    
-    "extraction_analysis": """
-        SELECT 
-            district_name,
-            assessment_year,
-            extraction_pct,
-            recharge_rate_mcm,
-            extraction_pct - recharge_rate_mcm as deficit_surplus,
-            CASE 
-                WHEN extraction_pct > recharge_rate_mcm * 1.5 THEN 'OVER_EXTRACTION_CRITICAL'
-                WHEN extraction_pct > recharge_rate_mcm THEN 'OVER_EXTRACTION_MODERATE'
-                WHEN extraction_pct < recharge_rate_mcm * 0.5 THEN 'UNDER_UTILIZATION'
-                ELSE 'BALANCED'
-            END as extraction_status
-        FROM groundwater_levels
-        WHERE extraction_pct IS NOT NULL AND recharge_rate_mcm IS NOT NULL
-        {district_filter}
-        {year_filter}
-        ORDER BY deficit_surplus DESC
-    """,
-    
-    "trend_forecast": """
-        WITH depth_trend AS (
-            SELECT 
-                district_name,
-                assessment_year,
-                avg_depth_meters,
-                AVG(avg_depth_meters) OVER (PARTITION BY district_name ORDER BY assessment_year 
-                    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) as moving_avg_3yr
-            FROM groundwater_levels
-            WHERE avg_depth_meters IS NOT NULL
-        )
-        SELECT 
-            district_name,
-            assessment_year,
-            avg_depth_meters,
-            moving_avg_3yr,
-            avg_depth_meters - moving_avg_3yr as deviation_from_trend,
-            CASE 
-                WHEN avg_depth_meters > moving_avg_3yr * 1.1 THEN 'DEEPENING_FAST'
-                WHEN avg_depth_meters > moving_avg_3yr * 1.05 THEN 'DEEPENING_SLOW'
-                WHEN avg_depth_meters < moving_avg_3yr * 0.95 THEN 'RECOVERING'
-                ELSE 'STABLE'
-            END as trend_direction
-        FROM depth_trend
-        WHERE assessment_year >= (SELECT MAX(assessment_year) - 5 FROM groundwater_levels)
-        ORDER BY district_name, assessment_year DESC
-    """,
-    
-    "risk_zones": """
-        SELECT 
-            district_name,
-            ROUND(AVG(avg_depth_meters), 2) as avg_depth,
-            ROUND(AVG(extraction_pct), 2) as avg_extraction,
-            ROUND(AVG(recharge_rate_mcm), 2) as avg_recharge,
-            CASE 
-                WHEN AVG(avg_depth_meters) > 40 AND AVG(extraction_pct) > 70 THEN 'CRITICAL_RISK'
-                WHEN AVG(avg_depth_meters) > 30 AND AVG(extraction_pct) > 50 THEN 'HIGH_RISK'
-                WHEN AVG(avg_depth_meters) > 20 AND AVG(extraction_pct) > 30 THEN 'MODERATE_RISK'
-                ELSE 'LOW_RISK'
-            END as risk_category,
-            RANK() OVER (ORDER BY AVG(avg_depth_meters) DESC, AVG(extraction_pct) DESC) as risk_rank
-        FROM groundwater_levels
-        WHERE avg_depth_meters IS NOT NULL AND extraction_pct IS NOT NULL
-        GROUP BY district_name
-        ORDER BY risk_rank
-        LIMIT 20
-    """
-}
-
-# ========== WATER QUALITY SQL QUERIES ==========
-WATER_QUALITY_QUERIES = {
-    "basic_filter": """
-        SELECT * FROM water_monitoring_stations 
-        WHERE 1=1
-        {state_filter}
-        {district_filter}
-        {ph_range}
-        {status_filter}
-        ORDER BY station_name
-    """,
-    
-    "ph_analysis": """
-        SELECT 
-            state_name,
-            district_name,
-            COUNT(*) as total_stations,
-            ROUND(AVG(ph_level), 2) as avg_ph,
-            ROUND(MIN(ph_level), 2) as min_ph,
-            ROUND(MAX(ph_level), 2) as max_ph,
-            ROUND(STDDEV(ph_level), 2) as ph_variability,
-            CASE 
-                WHEN AVG(ph_level) BETWEEN 6.5 AND 8.5 THEN 'IDEAL'
-                WHEN AVG(ph_level) BETWEEN 6.0 AND 9.0 THEN 'ACCEPTABLE'
-                ELSE 'CRITICAL'
-            END as ph_status
-        FROM water_monitoring_stations
-        WHERE ph_level IS NOT NULL
-        GROUP BY state_name, district_name
-        ORDER BY ph_status, avg_ph
-    """,
-    
-    "do_analysis": """
-        SELECT 
-            state_name,
-            district_name,
-            ROUND(AVG(dissolved_oxygen_mg_l), 2) as avg_do,
-            ROUND(MIN(dissolved_oxygen_mg_l), 2) as min_do,
-            ROUND(MAX(dissolved_oxygen_mg_l), 2) as max_do,
-            CASE 
-                WHEN AVG(dissolved_oxygen_mg_l) > 7 THEN 'EXCELLENT'
-                WHEN AVG(dissolved_oxygen_mg_l) > 5 THEN 'GOOD'
-                WHEN AVG(dissolved_oxygen_mg_l) > 3 THEN 'FAIR'
-                ELSE 'POOR'
-            END as water_quality_class,
-            CASE 
-                WHEN MIN(dissolved_oxygen_mg_l) < 3 THEN 'FISH_KILL_RISK'
-                WHEN MIN(dissolved_oxygen_mg_l) < 5 THEN 'STRESS_RISK'
-                ELSE 'SAFE'
-            END as ecological_risk
-        FROM water_monitoring_stations
-        WHERE dissolved_oxygen_mg_l IS NOT NULL
-        GROUP BY state_name, district_name
-        ORDER BY avg_do DESC
-    """,
-    
-    "turbidity_analysis": """
-        SELECT 
-            state_name,
-            district_name,
-            station_name,
-            turbidity_ntu,
-            CASE 
-                WHEN turbidity_ntu < 5 THEN 'CLEAR'
-                WHEN turbidity_ntu < 10 THEN 'SLIGHTLY_TURBID'
-                WHEN turbidity_ntu < 20 THEN 'TURBID'
-                ELSE 'HIGHLY_TURBID'
-            END as turbidity_level,
-            CASE 
-                WHEN turbidity_ntu > 20 THEN 'TREATMENT_REQUIRED'
-                WHEN turbidity_ntu > 10 THEN 'MONITORING_REQUIRED'
-                ELSE 'ACCEPTABLE'
-            END as treatment_need
-        FROM water_monitoring_stations
-        WHERE turbidity_ntu IS NOT NULL
-        {district_filter}
-        ORDER BY turbidity_ntu DESC
-        LIMIT 30
-    """,
-    
-    "comprehensive_quality_index": """
-        SELECT 
-            station_name,
-            state_name,
-            district_name,
-            ph_level,
-            dissolved_oxygen_mg_l,
-            turbidity_ntu,
-            (CASE 
-                WHEN ph_level BETWEEN 6.5 AND 8.5 THEN 100
-                WHEN ph_level BETWEEN 6.0 AND 9.0 THEN 70
-                ELSE 40
-            END * 0.3 +
-            CASE 
-                WHEN dissolved_oxygen_mg_l > 7 THEN 100
-                WHEN dissolved_oxygen_mg_l > 5 THEN 70
-                WHEN dissolved_oxygen_mg_l > 3 THEN 40
-                ELSE 10
-            END * 0.4 +
-            CASE 
-                WHEN turbidity_ntu < 5 THEN 100
-                WHEN turbidity_ntu < 10 THEN 70
-                WHEN turbidity_ntu < 20 THEN 40
-                ELSE 10
-            END * 0.3) as water_quality_index,
-            CASE 
-                WHEN (CASE WHEN ph_level BETWEEN 6.5 AND 8.5 THEN 100 ELSE 0 END +
-                     CASE WHEN dissolved_oxygen_mg_l > 5 THEN 100 ELSE 0 END +
-                     CASE WHEN turbidity_ntu < 10 THEN 100 ELSE 0 END) >= 250 THEN 'EXCELLENT'
-                WHEN (CASE WHEN ph_level BETWEEN 6.0 AND 9.0 THEN 100 ELSE 0 END +
-                     CASE WHEN dissolved_oxygen_mg_l > 3 THEN 100 ELSE 0 END +
-                     CASE WHEN turbidity_ntu < 20 THEN 100 ELSE 0 END) >= 200 THEN 'GOOD'
-                ELSE 'POOR'
-            END as overall_rating
-        FROM water_monitoring_stations
-        WHERE ph_level IS NOT NULL AND dissolved_oxygen_mg_l IS NOT NULL AND turbidity_ntu IS NOT NULL
-        ORDER BY water_quality_index DESC
-    """
-}
-
-# ========== SOURCE CAPACITY SQL QUERIES ==========
-SOURCE_CAPACITY_QUERIES = {
-    "basic_filter": """
-        SELECT * FROM water_sources 
-        WHERE 1=1
-        {state_filter}
-        {district_filter}
-        {capacity_range}
-        {risk_filter}
-        ORDER BY capacity_percent DESC
-    """,
-    
-    "capacity_analysis": """
-        SELECT 
-            source_type,
-            state,
-            COUNT(*) as total_sources,
-            ROUND(AVG(capacity_percent), 2) as avg_capacity,
-            ROUND(MIN(capacity_percent), 2) as min_capacity,
-            ROUND(MAX(capacity_percent), 2) as max_capacity,
-            ROUND(STDDEV(capacity_percent), 2) as capacity_variance,
-            SUM(CASE WHEN capacity_percent < 30 THEN 1 ELSE 0 END) as critical_sources,
-            SUM(CASE WHEN capacity_percent BETWEEN 30 AND 60 THEN 1 ELSE 0 END) as moderate_sources,
-            SUM(CASE WHEN capacity_percent > 60 THEN 1 ELSE 0 END) as good_sources
-        FROM water_sources
-        WHERE capacity_percent IS NOT NULL
-        GROUP BY source_type, state
-        ORDER BY avg_capacity DESC
-    """,
-    
-    "stress_assessment": """
-        SELECT 
-            source_name,
-            source_type,
-            state,
-            district,
-            capacity_percent,
-            CASE 
-                WHEN capacity_percent < 20 THEN 'EMERGENCY'
-                WHEN capacity_percent < 30 THEN 'CRITICAL'
-                WHEN capacity_percent < 50 THEN 'STRESSED'
-                WHEN capacity_percent < 70 THEN 'MODERATE'
-                ELSE 'NORMAL'
-            END as stress_level,
-            CASE 
-                WHEN capacity_percent < 30 THEN 'IMMEDIATE_ACTION_REQUIRED'
-                WHEN capacity_percent < 50 THEN 'ACTION_PLANNING_REQUIRED'
-                WHEN capacity_percent < 70 THEN 'MONITORING_REQUIRED'
-                ELSE 'ROUTINE_OPERATION'
-            END as management_action,
-            RANK() OVER (ORDER BY capacity_percent) as priority_rank
-        FROM water_sources
-        WHERE capacity_percent IS NOT NULL
-        {state_filter}
-        {district_filter}
-        ORDER BY capacity_percent
-        LIMIT 30
-    """,
-    
-    "trend_analysis": """
-        WITH capacity_history AS (
-            SELECT 
-                source_name,
-                source_type,
-                state,
-                capacity_percent,
-                LAG(capacity_percent, 1) OVER (PARTITION BY source_name ORDER BY assessment_date) as prev_capacity,
-                LAG(capacity_percent, 2) OVER (PARTITION BY source_name ORDER BY assessment_date) as prev2_capacity
-            FROM water_sources
-            WHERE capacity_percent IS NOT NULL AND assessment_date IS NOT NULL
-        )
-        SELECT 
-            source_name,
-            source_type,
-            state,
-            capacity_percent,
-            prev_capacity,
-            ROUND(capacity_percent - prev_capacity, 2) as change_from_prev,
-            ROUND((capacity_percent - prev_capacity) / NULLIF(prev_capacity, 0) * 100, 2) as percent_change,
-            CASE 
-                WHEN capacity_percent - prev_capacity > 10 THEN 'SIGNIFICANT_IMPROVEMENT'
-                WHEN capacity_percent - prev_capacity > 5 THEN 'MODERATE_IMPROVEMENT'
-                WHEN capacity_percent - prev_capacity < -10 THEN 'SIGNIFICANT_DECLINE'
-                WHEN capacity_percent - prev_capacity < -5 THEN 'MODERATE_DECLINE'
-                ELSE 'STABLE'
-            END as trend_status
-        FROM capacity_history
-        WHERE prev_capacity IS NOT NULL
-        ORDER BY ABS(percent_change) DESC
-        LIMIT 40
-    """,
-    
-    "resource_allocation_priority": """
-        SELECT 
-            state,
-            district,
-            COUNT(*) as total_sources,
-            ROUND(AVG(capacity_percent), 2) as avg_capacity,
-            SUM(CASE WHEN capacity_percent < 30 THEN 1 ELSE 0 END) as critical_count,
-            SUM(CASE WHEN capacity_percent < 30 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as critical_ratio,
-            ROW_NUMBER() OVER (ORDER BY SUM(CASE WHEN capacity_percent < 30 THEN 1 ELSE 0 END) DESC) as intervention_priority,
-            CASE 
-                WHEN SUM(CASE WHEN capacity_percent < 30 THEN 1 ELSE 0 END) > 5 THEN 'HIGH_PRIORITY_INTERVENTION'
-                WHEN SUM(CASE WHEN capacity_percent < 30 THEN 1 ELSE 0 END) > 2 THEN 'MEDIUM_PRIORITY_INTERVENTION'
-                ELSE 'ROUTINE_MONITORING'
-            END as intervention_level
-        FROM water_sources
-        WHERE capacity_percent IS NOT NULL
-        GROUP BY state, district
-        HAVING COUNT(*) > 2
-        ORDER BY critical_ratio DESC
-        LIMIT 25
-    """
-}
-
-# ========== EXTENDED WATER USAGE SQL QUERIES ==========
-WATER_USAGE_QUERIES = {
-    "sector_consumption": """
-        SELECT 
-            sector,
-            record_year,
-            SUM(consumption_mcm) as total_consumption,
-            AVG(consumption_mcm) as avg_consumption,
-            COUNT(*) as usage_records,
-            LAG(SUM(consumption_mcm), 1) OVER (PARTITION BY sector ORDER BY record_year) as prev_year_consumption,
-            ROUND(((SUM(consumption_mcm) - LAG(SUM(consumption_mcm), 1) OVER (PARTITION BY sector ORDER BY record_year)) / 
-                   NULLIF(LAG(SUM(consumption_mcm), 1) OVER (PARTITION BY sector ORDER BY record_year), 0) * 100), 2) as yoy_growth_pct
-        FROM water_usage_history
-        WHERE consumption_mcm IS NOT NULL AND sector IS NOT NULL
-        GROUP BY sector, record_year
-        ORDER BY sector, record_year DESC
-    """,
-    
-    "efficiency_metrics": """
-        SELECT 
-            sector,
-            source_type,
-            ROUND(AVG(consumption_mcm), 2) as avg_consumption,
-            ROUND(SUM(consumption_mcm), 2) as total_consumption,
-            ROUND(AVG(consumption_mcm) / NULLIF(AVG(source_capacity), 1), 2) as utilization_efficiency,
-            CASE 
-                WHEN AVG(consumption_mcm) / NULLIF(AVG(source_capacity), 1) > 0.8 THEN 'OVER_UTILIZED'
-                WHEN AVG(consumption_mcm) / NULLIF(AVG(source_capacity), 1) > 0.6 THEN 'EFFICIENT'
-                WHEN AVG(consumption_mcm) / NULLIF(AVG(source_capacity), 1) > 0.4 THEN 'MODERATE'
-                ELSE 'UNDER_UTILIZED'
-            END as efficiency_rating
-        FROM water_usage_history wu
-        LEFT JOIN water_sources ws ON wu.source_id = ws.source_id
-        WHERE consumption_mcm IS NOT NULL
-        GROUP BY sector, source_type
-        ORDER BY utilization_efficiency DESC
-    """,
-    
-    "peak_demand_analysis": """
-        WITH ranked_usage AS (
-            SELECT 
-                sector,
-                season,
-                record_year,
-                consumption_mcm,
-                ROW_NUMBER() OVER (PARTITION BY sector, record_year ORDER BY consumption_mcm DESC) as rank_in_year
-            FROM water_usage_history
-            WHERE consumption_mcm IS NOT NULL
-        )
-        SELECT 
-            sector,
-            season,
-            record_year,
-            consumption_mcm as peak_demand,
-            AVG(consumption_mcm) OVER (PARTITION BY sector, record_year) as avg_demand,
-            consumption_mcm - AVG(consumption_mcm) OVER (PARTITION BY sector, record_year) as demand_surplus,
-            ROUND((consumption_mcm / NULLIF(AVG(consumption_mcm) OVER (PARTITION BY sector, record_year), 0) * 100), 2) as peak_to_avg_ratio
-        FROM ranked_usage
-        WHERE rank_in_year = 1
-        ORDER BY peak_demand DESC
-        LIMIT 30
-    """
-}
+        return pd.DataFrame({'message': ['Demo data - Connect to database for live data']})
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA LOADING
@@ -720,12 +184,11 @@ WATER_USAGE_QUERIES = {
 @st.cache_data(ttl=300)
 def load_all_data():
     if engine is None:
-        # Return sample data for demo mode
         return create_sample_data()
     
     try:
         with engine.connect() as conn:
-            conn.rollback()  # Rollback any pending transactions
+            conn.rollback()
             tables = pd.read_sql("SELECT table_name FROM information_schema.tables WHERE table_schema='public'", conn)["table_name"].tolist()
             
             def get_df(tbl):
@@ -750,417 +213,423 @@ def load_all_data():
             
             return sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality
     except Exception as e:
-        st.warning(f"Error loading data: {str(e)[:100]}. Using demo data.")
+        st.warning(f"Error loading data. Using demo data.")
         return create_sample_data()
 
 def create_sample_data():
-    """Create sample data for demo mode"""
+    """Create comprehensive sample data for demo mode"""
+    np.random.seed(42)
+    
+    # Water Sources
     sources = pd.DataFrame({
-        'source_id': range(1, 11),
-        'source_name': [f'Source {i}' for i in range(1, 11)],
-        'source_type': ['River', 'Reservoir', 'Lake', 'Well', 'Canal'] * 2,
-        'state': ['State A', 'State B', 'State A', 'State B', 'State A'] * 2,
-        'district': [f'District {i}' for i in range(1, 11)],
-        'capacity_percent': np.random.randint(20, 95, 10),
-        'latitude': np.random.uniform(8, 37, 10),
-        'longitude': np.random.uniform(68, 97, 10),
-        'assessment_date': pd.date_range('2024-01-01', periods=10)
+        'source_id': range(1, 21),
+        'source_name': [f'Source_{i}' for i in range(1, 21)],
+        'source_type': np.random.choice(['River', 'Reservoir', 'Lake', 'Well', 'Canal'], 20),
+        'state': np.random.choice(['State A', 'State B', 'State C', 'State D'], 20),
+        'district': [f'District_{i}' for i in range(1, 21)],
+        'capacity_percent': np.random.randint(20, 100, 20),
+        'latitude': np.random.uniform(8, 37, 20),
+        'longitude': np.random.uniform(68, 97, 20),
+        'assessment_date': pd.date_range('2024-01-01', periods=20)
     })
+    sources['risk_level'] = pd.cut(sources['capacity_percent'], bins=[0, 30, 60, 100], labels=['Critical', 'Moderate', 'Good'])
     
+    # Water Monitoring Stations
     stations = pd.DataFrame({
-        'station_id': range(1, 11),
-        'station_name': [f'Station {i}' for i in range(1, 11)],
-        'state_name': ['State A', 'State B'] * 5,
-        'district_name': [f'District {i}' for i in range(1, 11)],
-        'ph_level': np.random.uniform(6.5, 8.5, 10),
-        'dissolved_oxygen_mg_l': np.random.uniform(4, 8, 10),
-        'turbidity_ntu': np.random.uniform(2, 15, 10),
-        'status': np.random.choice(['Active', 'Maintenance', 'Inactive'], 10)
+        'station_id': range(1, 16),
+        'station_name': [f'Station_{i}' for i in range(1, 16)],
+        'state_name': np.random.choice(['State A', 'State B', 'State C', 'State D'], 15),
+        'district_name': [f'District_{i}' for i in range(1, 16)],
+        'ph_level': np.random.uniform(6.2, 8.8, 15),
+        'dissolved_oxygen_mg_l': np.random.uniform(3.5, 8.5, 15),
+        'turbidity_ntu': np.random.uniform(1, 25, 15),
+        'status': np.random.choice(['Active', 'Active', 'Active', 'Maintenance', 'Inactive'], 15, p=[0.7, 0.1, 0.1, 0.05, 0.05])
     })
     
+    # Groundwater Levels
     groundwater = pd.DataFrame({
-        'record_id': range(1, 21),
-        'district_name': [f'District {i}' for i in range(1, 11)] * 2,
-        'avg_depth_meters': np.random.uniform(10, 50, 20),
-        'extraction_pct': np.random.uniform(30, 80, 20),
-        'recharge_rate_mcm': np.random.uniform(100, 500, 20),
-        'assessment_year': [2023, 2024] * 10,
-        'stress_level': np.random.choice(['Low', 'Moderate', 'High'], 20)
+        'record_id': range(1, 41),
+        'district_name': [f'District_{i}' for i in range(1, 9)] * 5,
+        'avg_depth_meters': np.random.uniform(15, 55, 40),
+        'extraction_pct': np.random.uniform(35, 85, 40),
+        'recharge_rate_mcm': np.random.uniform(150, 450, 40),
+        'assessment_year': np.random.choice([2020, 2021, 2022, 2023, 2024], 40),
+        'stress_level': np.random.choice(['Low', 'Moderate', 'High', 'Critical'], 40)
     })
     
+    # Rainfall History
     rainfall = pd.DataFrame({
-        'record_id': range(1, 31),
-        'district_name': [f'District {i}' for i in range(1, 11)] * 3,
-        'rainfall_cm': np.random.uniform(20, 300, 30),
-        'record_year': [2022, 2023, 2024] * 10,
-        'season': np.random.choice(['Winter', 'Summer', 'Monsoon', 'Post-Monsoon'], 30),
-        'rainfall_category': np.random.choice(['Low', 'Moderate', 'High', 'Extreme'], 30)
+        'record_id': range(1, 61),
+        'district_name': [f'District_{i}' for i in range(1, 9)] * 7 + [f'District_{i}' for i in range(1, 5)],
+        'rainfall_cm': np.random.uniform(20, 350, 60),
+        'record_year': np.random.choice([2020, 2021, 2022, 2023, 2024], 60),
+        'season': np.random.choice(['Winter', 'Summer', 'Monsoon', 'Post-Monsoon'], 60),
+        'rainfall_category': np.random.choice(['Low', 'Moderate', 'High', 'Extreme'], 60)
     })
     
+    # Alerts
     alerts = pd.DataFrame({
-        'alert_id': range(1, 6),
-        'source_name': [f'Source {i}' for i in range(1, 6)],
-        'alert_status': np.random.choice(['CRITICAL', 'WARNING', 'INFO'], 5),
-        'alert_message': ['Low capacity', 'High extraction', 'Poor quality', 'Drought risk', 'Flood risk'][:5],
-        'timestamp': pd.date_range('2024-01-01', periods=5)
+        'alert_id': range(1, 8),
+        'source_name': [f'Source_{i}' for i in range(1, 8)],
+        'alert_status': np.random.choice(['CRITICAL', 'WARNING', 'INFO'], 7, p=[0.3, 0.4, 0.3]),
+        'alert_message': ['Low capacity', 'High extraction', 'Poor quality', 'Drought risk', 'Flood watch', 'Maintenance due', 'Over usage'],
+        'timestamp': pd.date_range('2024-01-01', periods=7)
     })
     
     return sources, stations, groundwater, rainfall, alerts, pd.DataFrame(), pd.DataFrame(), stations
 
-with st.spinner("🚀 Connecting to AQUASTAT Cloud…"):
+with st.spinner("🚀 Loading AQUASTAT Data..."):
     sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality = load_all_data()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA PROCESSING
 # ─────────────────────────────────────────────────────────────────────────────
-current_year = datetime.now().year
 current_time = datetime.now(pytz.timezone("Asia/Kolkata"))
 
-if not sources.empty:
-    if "capacity_percent" in sources.columns:
-        sources["capacity_percent"] = pd.to_numeric(sources["capacity_percent"], errors="coerce")
+if not sources.empty and "capacity_percent" in sources.columns:
+    sources["capacity_percent"] = pd.to_numeric(sources["capacity_percent"], errors="coerce")
+    if "risk_level" not in sources.columns:
         sources["risk_level"] = pd.cut(sources["capacity_percent"], bins=[0, 30, 60, 100], labels=["Critical", "Moderate", "Good"], include_lowest=True)
 
 if not groundwater.empty and "avg_depth_meters" in groundwater.columns:
-    groundwater["stress_level"] = pd.cut(groundwater["avg_depth_meters"], bins=[0, 20, 40, 100], labels=["Low", "Moderate", "High"])
+    if "stress_level" not in groundwater.columns:
+        groundwater["stress_level"] = pd.cut(groundwater["avg_depth_meters"], bins=[0, 20, 40, 100], labels=["Low", "Moderate", "High"])
 
 if not rainfall.empty and "rainfall_cm" in rainfall.columns:
-    rainfall["rainfall_category"] = pd.cut(rainfall["rainfall_cm"], bins=[0, 50, 150, 300, float("inf")], labels=["Low", "Moderate", "High", "Extreme"])
+    if "rainfall_category" not in rainfall.columns:
+        rainfall["rainfall_category"] = pd.cut(rainfall["rainfall_cm"], bins=[0, 50, 150, 300, float("inf")], labels=["Low", "Moderate", "High", "Extreme"])
 
 # ─────────────────────────────────────────────────────────────────────────────
-# UNIFIED FILTER SYSTEM
-# ─────────────────────────────────────────────────────────────────────────────
-def build_query_with_filters(base_query, filters):
-    """Build SQL query with applied filters"""
-    query = base_query
-    params = []
-    
-    for key, value in filters.items():
-        if value is not None:
-            query = query.replace(f"{{{key}}}", value)
-        else:
-            query = query.replace(f"{{{key}}}", "")
-    
-    # Clean up any remaining placeholders
-    query = query.replace("WHERE  AND", "WHERE")
-    query = query.replace("WHERE  WHERE", "WHERE")
-    query = query.replace("AND  AND", "AND")
-    query = query.replace("  ", " ")
-    
-    return query, params
-
-# Initialize session state for filters
-if "filter_type" not in st.session_state:
-    st.session_state.filter_type = "🌧️ Rainfall Filter"
-if "selected_sql_query" not in st.session_state:
-    st.session_state.selected_sql_query = "basic_filter"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR FILTERS
+# SIDEBAR FILTERS - ALL FILTERS RESTORED HERE
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🎮 AQUASTAT")
-    st.caption("Advanced Water Management System")
+    st.caption("Complete Water Management System")
     st.markdown("---")
     
+    # Reset button
     if st.button("🔄 Reset All Filters", use_container_width=True):
         st.cache_data.clear()
-        for key in list(st.session_state.keys()):
-            if key not in ["filter_type", "selected_sql_query"]:
-                del st.session_state[key]
         st.rerun()
     
     st.markdown("---")
-    st.markdown("### 🗺️ Map Settings")
-    show_heatmap = st.checkbox("Show Heatmap", True)
-    show_clusters = st.checkbox("Show Clusters", True)
-    marker_size = st.slider("Marker Size", 5, 20, 12)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN FILTER SECTION - UNIFIED LOCATION
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown('<div class="filter-container">', unsafe_allow_html=True)
-st.markdown("### 🔍 Advanced Filter System")
-st.markdown("Select a filter type from the dropdown below to apply specific filters:")
-
-# Filter Type Selection
-filter_type = st.selectbox(
-    "📋 Select Filter Type",
-    options=["🌧️ Rainfall Filter", "🌊 Groundwater Filter", "💧 Water Quality (pH) Filter", "🏭 Source Capacity Filter", "📊 Water Usage Filter"],
-    key="filter_type"
-)
-
-st.markdown("---")
-
-# Store results in session state
-if "filter_results" not in st.session_state:
-    st.session_state.filter_results = None
-if "current_query" not in st.session_state:
-    st.session_state.current_query = ""
-
-# Dynamic Filter Controls based on selection
-if filter_type == "🌧️ Rainfall Filter":
-    st.markdown("#### 🌧️ Rainfall Data Filter")
     
-    # SQL Query Type Selection
-    query_type = st.selectbox(
-        "📊 Select Analysis Type",
-        options=list(RAINFALL_QUERIES.keys()),
-        key="rain_query_type",
-        help="Choose different SQL analysis queries"
+    # Filter Type Selection Dropdown
+    st.markdown("### 📋 Select Filter Category")
+    filter_category = st.selectbox(
+        "Choose Filter Type",
+        options=["🏭 Source Capacity", "🌧️ Rainfall", "🌊 Groundwater", "💧 Water Quality", "📊 Combined Analytics"],
+        key="filter_category_sidebar",
+        help="Select which dataset to filter"
     )
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        districts = rainfall['district_name'].unique().tolist() if 'district_name' in rainfall.columns else []
-        district_filter = st.selectbox("District", ["All Districts"] + list(districts), key="rain_district")
-        min_rainfall = st.number_input("Min Rainfall (cm)", 0.0, 1000.0, 0.0, key="min_rainfall")
-    
-    with col2:
-        max_rainfall = st.number_input("Max Rainfall (cm)", 0.0, 1000.0, 500.0, key="max_rainfall")
-        years = rainfall['record_year'].unique().tolist() if 'record_year' in rainfall.columns else []
-        year_filter = st.selectbox("Year", ["All"] + sorted(years), key="rain_year")
-    
-    with col3:
-        season_filter = st.selectbox("Season", ["All", "Winter", "Summer", "Monsoon", "Post-Monsoon"], key="season")
-        category_filter = st.selectbox("Rainfall Category", ["All", "Low", "Moderate", "High", "Extreme"], key="rain_category")
-    
-    # Build filter conditions
-    filters = {
-        "district_filter": f"AND district_name = '{district_filter}'" if district_filter != "All Districts" else "",
-        "rainfall_range": f"AND rainfall_cm BETWEEN {min_rainfall} AND {max_rainfall}" if min_rainfall > 0 or max_rainfall < 1000 else "",
-        "year_filter": f"AND record_year = {year_filter}" if year_filter != "All" else "",
-        "season_filter": f"AND season = '{season_filter}'" if season_filter != "All" else "",
-        "category_filter": f"AND rainfall_category = '{category_filter}'" if category_filter != "All" else ""
-    }
-    
-    if st.button("🔍 Apply Rainfall Filter", use_container_width=True, type="primary"):
-        base_query = RAINFALL_QUERIES.get(query_type, RAINFALL_QUERIES["basic_filter"])
-        query, params = build_query_with_filters(base_query, filters)
-        st.session_state.current_query = query
-        results, error = execute_sql_query(query, params)
-        if error:
-            st.error(f"Error: {error}")
-            st.session_state.filter_results = None
-        else:
-            st.session_state.filter_results = results
-            st.success(f"✅ Found {len(results)} records")
-
-elif filter_type == "🌊 Groundwater Filter":
-    st.markdown("#### 🌊 Groundwater Data Filter")
-    
-    query_type = st.selectbox(
-        "📊 Select Analysis Type",
-        options=list(GROUNDWATER_QUERIES.keys()),
-        key="gw_query_type"
-    )
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        districts = groundwater['district_name'].unique().tolist() if 'district_name' in groundwater.columns else []
-        gw_district = st.selectbox("District", ["All Districts"] + list(districts), key="gw_district")
-        min_depth = st.number_input("Min Depth (m)", 0.0, 100.0, 0.0, key="min_depth")
-    
-    with col2:
-        max_depth = st.number_input("Max Depth (m)", 0.0, 100.0, 50.0, key="max_depth")
-        stress_filter = st.selectbox("Stress Level", ["All", "Low", "Moderate", "High"], key="stress_level")
-    
-    with col3:
-        years = groundwater['assessment_year'].unique().tolist() if 'assessment_year' in groundwater.columns else []
-        gw_year = st.selectbox("Assessment Year", ["All"] + sorted(years), key="gw_year")
-    
-    filters = {
-        "district_filter": f"AND district_name = '{gw_district}'" if gw_district != "All Districts" else "",
-        "depth_range": f"AND avg_depth_meters BETWEEN {min_depth} AND {max_depth}" if min_depth > 0 or max_depth < 100 else "",
-        "stress_filter": f"AND stress_level = '{stress_filter}'" if stress_filter != "All" else "",
-        "year_filter": f"AND assessment_year = {gw_year}" if gw_year != "All" else ""
-    }
-    
-    if st.button("🔍 Apply Groundwater Filter", use_container_width=True, type="primary"):
-        base_query = GROUNDWATER_QUERIES.get(query_type, GROUNDWATER_QUERIES["basic_filter"])
-        query, params = build_query_with_filters(base_query, filters)
-        st.session_state.current_query = query
-        results, error = execute_sql_query(query, params)
-        if error:
-            st.error(f"Error: {error}")
-            st.session_state.filter_results = None
-        else:
-            st.session_state.filter_results = results
-            st.success(f"✅ Found {len(results)} records")
-
-elif filter_type == "💧 Water Quality (pH) Filter":
-    st.markdown("#### 💧 Water Quality & pH Filter")
-    
-    query_type = st.selectbox(
-        "📊 Select Analysis Type",
-        options=list(WATER_QUALITY_QUERIES.keys()),
-        key="wq_query_type"
-    )
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        states = water_quality['state_name'].unique().tolist() if 'state_name' in water_quality.columns else []
-        wq_state = st.selectbox("State", ["All States"] + list(states), key="wq_state")
-        min_ph = st.number_input("Min pH Level", 0.0, 14.0, 0.0, key="min_ph")
-    
-    with col2:
-        districts = water_quality['district_name'].unique().tolist() if 'district_name' in water_quality.columns else []
-        wq_district = st.selectbox("District", ["All Districts"] + list(districts), key="wq_district")
-        max_ph = st.number_input("Max pH Level", 0.0, 14.0, 14.0, key="max_ph")
-    
-    with col3:
-        status_filter = st.selectbox("Station Status", ["All", "Active", "Maintenance", "Inactive"], key="wq_status")
-        st.markdown("**pH Guide:** 6.5-8.5 (Ideal) | 6-9 (Acceptable)")
-    
-    filters = {
-        "state_filter": f"AND state_name = '{wq_state}'" if wq_state != "All States" else "",
-        "district_filter": f"AND district_name = '{wq_district}'" if wq_district != "All Districts" else "",
-        "ph_range": f"AND ph_level BETWEEN {min_ph} AND {max_ph}" if min_ph > 0 or max_ph < 14 else "",
-        "status_filter": f"AND status = '{status_filter}'" if status_filter != "All" else ""
-    }
-    
-    if st.button("🔍 Apply Water Quality Filter", use_container_width=True, type="primary"):
-        base_query = WATER_QUALITY_QUERIES.get(query_type, WATER_QUALITY_QUERIES["basic_filter"])
-        query, params = build_query_with_filters(base_query, filters)
-        st.session_state.current_query = query
-        results, error = execute_sql_query(query, params)
-        if error:
-            st.error(f"Error: {error}")
-            st.session_state.filter_results = None
-        else:
-            st.session_state.filter_results = results
-            st.success(f"✅ Found {len(results)} records")
-
-elif filter_type == "🏭 Source Capacity Filter":
-    st.markdown("#### 🏭 Water Source Capacity Filter")
-    
-    query_type = st.selectbox(
-        "📊 Select Analysis Type",
-        options=list(SOURCE_CAPACITY_QUERIES.keys()),
-        key="cap_query_type"
-    )
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        states = sources['state'].unique().tolist() if not sources.empty and 'state' in sources.columns else []
-        cap_state = st.selectbox("State", ["All States"] + list(states), key="cap_state")
-        min_capacity = st.number_input("Min Capacity (%)", 0, 100, 0, key="min_capacity")
-    
-    with col2:
-        districts = sources['district'].unique().tolist() if not sources.empty and 'district' in sources.columns else []
-        cap_district = st.selectbox("District", ["All Districts"] + list(districts), key="cap_district")
-        max_capacity = st.number_input("Max Capacity (%)", 0, 100, 100, key="max_capacity")
-    
-    with col3:
-        risk_filter = st.selectbox("Risk Level", ["All Risk Levels", "Critical", "Moderate", "Good"], key="risk_level_filter")
-        st.markdown("**Risk Guide:** <30% Critical | 30-60% Moderate | >60% Good")
-    
-    filters = {
-        "state_filter": f"AND state = '{cap_state}'" if cap_state != "All States" else "",
-        "district_filter": f"AND district = '{cap_district}'" if cap_district != "All Districts" else "",
-        "capacity_range": f"AND capacity_percent BETWEEN {min_capacity} AND {max_capacity}" if min_capacity > 0 or max_capacity < 100 else "",
-        "risk_filter": f"AND risk_level = '{risk_filter}'" if risk_filter != "All Risk Levels" else ""
-    }
-    
-    if st.button("🔍 Apply Source Capacity Filter", use_container_width=True, type="primary"):
-        base_query = SOURCE_CAPACITY_QUERIES.get(query_type, SOURCE_CAPACITY_QUERIES["basic_filter"])
-        query, params = build_query_with_filters(base_query, filters)
-        st.session_state.current_query = query
-        results, error = execute_sql_query(query, params)
-        if error:
-            st.error(f"Error: {error}")
-            st.session_state.filter_results = None
-        else:
-            st.session_state.filter_results = results
-            st.success(f"✅ Found {len(results)} records")
-
-elif filter_type == "📊 Water Usage Filter":
-    st.markdown("#### 📊 Water Usage Data Filter")
-    
-    query_type = st.selectbox(
-        "📊 Select Analysis Type",
-        options=list(WATER_USAGE_QUERIES.keys()),
-        key="usage_query_type"
-    )
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        sectors = ["All", "Agriculture", "Industrial", "Domestic", "Power Generation"]
-        usage_sector = st.selectbox("Sector", sectors, key="usage_sector")
-        min_consumption = st.number_input("Min Consumption (MCM)", 0.0, 10000.0, 0.0, key="min_consumption")
-    
-    with col2:
-        usage_year = st.selectbox("Year", ["All"] + list(range(2020, 2026)), key="usage_year")
-        max_consumption = st.number_input("Max Consumption (MCM)", 0.0, 10000.0, 5000.0, key="max_consumption")
-    
-    filters = {
-        "sector_filter": f"AND sector = '{usage_sector}'" if usage_sector != "All" else "",
-        "year_filter": f"AND record_year = {usage_year}" if usage_year != "All" else "",
-        "consumption_range": f"AND consumption_mcm BETWEEN {min_consumption} AND {max_consumption}" if min_consumption > 0 or max_consumption < 10000 else ""
-    }
-    
-    if st.button("🔍 Apply Water Usage Filter", use_container_width=True, type="primary"):
-        base_query = WATER_USAGE_QUERIES.get(query_type, WATER_USAGE_QUERIES["sector_consumption"])
-        query, params = build_query_with_filters(base_query, filters)
-        st.session_state.current_query = query
-        results, error = execute_sql_query(query, params)
-        if error:
-            st.error(f"Error: {error}")
-            st.session_state.filter_results = None
-        else:
-            st.session_state.filter_results = results
-            st.success(f"✅ Found {len(results)} records")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# Display SQL Query and Results
-if st.session_state.current_query:
     st.markdown("---")
-    st.markdown("### 📝 Executed SQL Query")
-    with st.expander("View SQL Query", expanded=False):
-        st.code(st.session_state.current_query, language="sql")
     
-    if st.session_state.filter_results is not None and not st.session_state.filter_results.empty:
-        st.markdown("### 📊 Filter Results")
-        st.dataframe(st.session_state.filter_results, use_container_width=True)
-        st.caption(f"📈 Total records found: {len(st.session_state.filter_results)}")
+    # Dynamic filters based on selection
+    if filter_category == "🏭 Source Capacity":
+        st.markdown("### 🏭 Source Capacity Filters")
         
-        # Download button
-        csv = st.session_state.filter_results.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Results as CSV", csv, f"{filter_type.replace(' ', '_')}_results.csv", "text/csv")
+        # State Filter
+        if not sources.empty and "state" in sources.columns:
+            state_options = ["All States"] + sorted(sources["state"].dropna().unique().tolist())
+            selected_state = st.selectbox("📍 Select State", state_options, key="source_state")
+        else:
+            selected_state = "All States"
+            state_options = ["All States"]
+        
+        # District Filter (dependent on state)
+        if not sources.empty and "district" in sources.columns:
+            if selected_state != "All States":
+                district_options = ["All Districts"] + sorted(sources[sources["state"] == selected_state]["district"].dropna().unique().tolist())
+            else:
+                district_options = ["All Districts"] + sorted(sources["district"].dropna().unique().tolist())
+            selected_district = st.selectbox("📍 Select District", district_options, key="source_district")
+        else:
+            selected_district = "All Districts"
+        
+        # Source Type Filter
+        if not sources.empty and "source_type" in sources.columns:
+            type_options = ["All Types"] + sorted(sources["source_type"].dropna().unique().tolist())
+            selected_type = st.selectbox("💧 Source Type", type_options, key="source_type")
+        else:
+            selected_type = "All Types"
+        
+        # Capacity Range
+        st.markdown("### 📊 Capacity Range")
+        capacity_range = st.slider("Capacity Percentage (%)", 0, 100, (0, 100), key="capacity_range")
+        
+        # Risk Level Filter
+        risk_options = ["All Risk Levels", "Critical", "Moderate", "Good"]
+        selected_risk = st.selectbox("⚠️ Risk Level", risk_options, key="source_risk")
+        
+        # Apply button for source filter
+        if st.button("🔍 Apply Source Filters", use_container_width=True, type="primary"):
+            st.session_state.source_filters_applied = True
+            st.success("✅ Filters applied to dashboard!")
+    
+    elif filter_category == "🌧️ Rainfall":
+        st.markdown("### 🌧️ Rainfall Filters")
+        
+        # District Filter
+        if not rainfall.empty and "district_name" in rainfall.columns:
+            rain_districts = ["All Districts"] + sorted(rainfall["district_name"].dropna().unique().tolist())
+            selected_rain_district = st.selectbox("📍 Select District", rain_districts, key="rain_district")
+        else:
+            selected_rain_district = "All Districts"
+        
+        # Year Filter
+        if not rainfall.empty and "record_year" in rainfall.columns:
+            year_options = ["All Years"] + sorted(rainfall["record_year"].dropna().unique().tolist())
+            selected_year = st.selectbox("📅 Select Year", year_options, key="rain_year")
+        else:
+            selected_year = "All Years"
+        
+        # Season Filter
+        season_options = ["All Seasons", "Winter", "Summer", "Monsoon", "Post-Monsoon"]
+        selected_season = st.selectbox("🌤️ Season", season_options, key="rain_season")
+        
+        # Rainfall Range
+        st.markdown("### 📊 Rainfall Range (cm)")
+        rain_range = st.slider("Rainfall (cm)", 0, 500, (0, 500), key="rain_range")
+        
+        # Category Filter
+        category_options = ["All Categories", "Low", "Moderate", "High", "Extreme"]
+        selected_category = st.selectbox("🏷️ Rainfall Category", category_options, key="rain_category")
+        
+        if st.button("🔍 Apply Rainfall Filters", use_container_width=True, type="primary"):
+            st.session_state.rain_filters_applied = True
+            st.success("✅ Rainfall filters applied!")
+    
+    elif filter_category == "🌊 Groundwater":
+        st.markdown("### 🌊 Groundwater Filters")
+        
+        # District Filter
+        if not groundwater.empty and "district_name" in groundwater.columns:
+            gw_districts = ["All Districts"] + sorted(groundwater["district_name"].dropna().unique().tolist())
+            selected_gw_district = st.selectbox("📍 Select District", gw_districts, key="gw_district")
+        else:
+            selected_gw_district = "All Districts"
+        
+        # Year Filter
+        if not groundwater.empty and "assessment_year" in groundwater.columns:
+            gw_year_options = ["All Years"] + sorted(groundwater["assessment_year"].dropna().unique().tolist())
+            selected_gw_year = st.selectbox("📅 Assessment Year", gw_year_options, key="gw_year")
+        else:
+            selected_gw_year = "All Years"
+        
+        # Depth Range
+        st.markdown("### 📊 Depth Range (meters)")
+        depth_range = st.slider("Groundwater Depth (m)", 0, 100, (0, 100), key="depth_range")
+        
+        # Stress Level
+        stress_options = ["All Levels", "Low", "Moderate", "High", "Critical"]
+        selected_stress = st.selectbox("⚠️ Stress Level", stress_options, key="gw_stress")
+        
+        # Extraction Range
+        st.markdown("### 💧 Extraction Rate (%)")
+        extraction_range = st.slider("Extraction Percentage (%)", 0, 100, (0, 100), key="extraction_range")
+        
+        if st.button("🔍 Apply Groundwater Filters", use_container_width=True, type="primary"):
+            st.session_state.gw_filters_applied = True
+            st.success("✅ Groundwater filters applied!")
+    
+    elif filter_category == "💧 Water Quality":
+        st.markdown("### 💧 Water Quality Filters")
+        
+        # State Filter
+        if not water_quality.empty and "state_name" in water_quality.columns:
+            wq_state_options = ["All States"] + sorted(water_quality["state_name"].dropna().unique().tolist())
+            selected_wq_state = st.selectbox("📍 Select State", wq_state_options, key="wq_state")
+        else:
+            selected_wq_state = "All States"
+        
+        # District Filter
+        if not water_quality.empty and "district_name" in water_quality.columns:
+            if selected_wq_state != "All States":
+                wq_district_options = ["All Districts"] + sorted(water_quality[water_quality["state_name"] == selected_wq_state]["district_name"].dropna().unique().tolist())
+            else:
+                wq_district_options = ["All Districts"] + sorted(water_quality["district_name"].dropna().unique().tolist())
+            selected_wq_district = st.selectbox("📍 Select District", wq_district_options, key="wq_district")
+        else:
+            selected_wq_district = "All Districts"
+        
+        # pH Range
+        st.markdown("### 🧪 pH Level Range")
+        ph_range = st.slider("pH Level", 0.0, 14.0, (6.0, 8.5), 0.1, key="ph_range")
+        
+        # DO Range
+        st.markdown("### 💨 Dissolved Oxygen (mg/L)")
+        do_range = st.slider("Dissolved Oxygen (mg/L)", 0.0, 15.0, (4.0, 8.0), 0.1, key="do_range")
+        
+        # Station Status
+        status_options = ["All Status", "Active", "Maintenance", "Inactive"]
+        selected_status = st.selectbox("🏭 Station Status", status_options, key="wq_status")
+        
+        if st.button("🔍 Apply Water Quality Filters", use_container_width=True, type="primary"):
+            st.session_state.wq_filters_applied = True
+            st.success("✅ Water quality filters applied!")
+    
+    elif filter_category == "📊 Combined Analytics":
+        st.markdown("### 📊 Combined Analytics Filters")
+        st.info("Apply multiple filters across all datasets")
+        
+        # Year range for combined analysis
+        year_range = st.slider("Year Range", 2020, 2024, (2022, 2024), key="year_range")
+        
+        # Minimum data quality
+        min_data_points = st.slider("Minimum Data Points per District", 3, 20, 5, key="min_data")
+        
+        if st.button("🔍 Apply Combined Filters", use_container_width=True, type="primary"):
+            st.session_state.combined_filters_applied = True
+            st.success("✅ Combined filters applied!")
+    
+    st.markdown("---")
+    st.markdown("### 🗺️ Map Visualization Settings")
+    show_clusters = st.checkbox("Show Marker Clusters", True, key="show_clusters")
+    marker_size = st.slider("Marker Size", 5, 20, 10, key="marker_size")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS FOR MAP AND DASHBOARD
+# APPLY FILTERS TO DATAFRAMES
 # ─────────────────────────────────────────────────────────────────────────────
-def apply_source_filters():
+def filter_sources_data():
     df = sources.copy()
     if df.empty:
         return df
     
-    if 'selected_state' in st.session_state and st.session_state.selected_state != "All States" and "state" in df.columns:
-        df = df[df["state"] == st.session_state.selected_state]
-    if 'selected_district' in st.session_state and st.session_state.selected_district != "All Districts" and "district" in df.columns:
-        df = df[df["district"] == st.session_state.selected_district]
-    if 'selected_type' in st.session_state and st.session_state.selected_type != "All Types" and "source_type" in df.columns:
-        df = df[df["source_type"] == st.session_state.selected_type]
-    if 'selected_risk' in st.session_state and st.session_state.selected_risk != "All Risk Levels" and "risk_level" in df.columns:
-        df = df[df["risk_level"] == st.session_state.selected_risk]
+    # Apply state filter
+    if 'selected_state' in st.session_state and st.session_state.selected_state != "All States":
+        if "state" in df.columns:
+            df = df[df["state"] == st.session_state.selected_state]
+    
+    # Apply district filter
+    if 'selected_district' in st.session_state and st.session_state.selected_district != "All Districts":
+        if "district" in df.columns:
+            df = df[df["district"] == st.session_state.selected_district]
+    
+    # Apply source type filter
+    if 'selected_type' in st.session_state and st.session_state.selected_type != "All Types":
+        if "source_type" in df.columns:
+            df = df[df["source_type"] == st.session_state.selected_type]
+    
+    # Apply capacity range filter
+    if 'capacity_range' in st.session_state:
+        min_cap, max_cap = st.session_state.capacity_range
+        if "capacity_percent" in df.columns:
+            df = df[(df["capacity_percent"] >= min_cap) & (df["capacity_percent"] <= max_cap)]
+    
+    # Apply risk filter
+    if 'selected_risk' in st.session_state and st.session_state.selected_risk != "All Risk Levels":
+        if "risk_level" in df.columns:
+            df = df[df["risk_level"] == st.session_state.selected_risk]
+    
     return df
 
-# Initialize sidebar filters if not present
-if "selected_state" not in st.session_state:
-    state_opts = ["All States"] + sorted(sources["state"].dropna().unique().tolist()) if not sources.empty and "state" in sources.columns else ["All States"]
-    st.session_state.selected_state = "All States"
-    st.session_state.selected_district = "All Districts"
-    st.session_state.selected_type = "All Types"
-    st.session_state.selected_risk = "All Risk Levels"
+def filter_rainfall_data():
+    df = rainfall.copy()
+    if df.empty:
+        return df
+    
+    # Apply district filter
+    if 'selected_rain_district' in st.session_state and st.session_state.selected_rain_district != "All Districts":
+        if "district_name" in df.columns:
+            df = df[df["district_name"] == st.session_state.selected_rain_district]
+    
+    # Apply year filter
+    if 'selected_year' in st.session_state and st.session_state.selected_year != "All Years":
+        if "record_year" in df.columns:
+            df = df[df["record_year"] == st.session_state.selected_year]
+    
+    # Apply season filter
+    if 'selected_season' in st.session_state and st.session_state.selected_season != "All Seasons":
+        if "season" in df.columns:
+            df = df[df["season"] == st.session_state.selected_season]
+    
+    # Apply rainfall range filter
+    if 'rain_range' in st.session_state:
+        min_rain, max_rain = st.session_state.rain_range
+        if "rainfall_cm" in df.columns:
+            df = df[(df["rainfall_cm"] >= min_rain) & (df["rainfall_cm"] <= max_rain)]
+    
+    # Apply category filter
+    if 'selected_category' in st.session_state and st.session_state.selected_category != "All Categories":
+        if "rainfall_category" in df.columns:
+            df = df[df["rainfall_category"] == st.session_state.selected_category]
+    
+    return df
 
-filtered_sources = apply_source_filters()
+def filter_groundwater_data():
+    df = groundwater.copy()
+    if df.empty:
+        return df
+    
+    # Apply district filter
+    if 'selected_gw_district' in st.session_state and st.session_state.selected_gw_district != "All Districts":
+        if "district_name" in df.columns:
+            df = df[df["district_name"] == st.session_state.selected_gw_district]
+    
+    # Apply year filter
+    if 'selected_gw_year' in st.session_state and st.session_state.selected_gw_year != "All Years":
+        if "assessment_year" in df.columns:
+            df = df[df["assessment_year"] == st.session_state.selected_gw_year]
+    
+    # Apply depth range filter
+    if 'depth_range' in st.session_state:
+        min_depth, max_depth = st.session_state.depth_range
+        if "avg_depth_meters" in df.columns:
+            df = df[(df["avg_depth_meters"] >= min_depth) & (df["avg_depth_meters"] <= max_depth)]
+    
+    # Apply stress filter
+    if 'selected_stress' in st.session_state and st.session_state.selected_stress != "All Levels":
+        if "stress_level" in df.columns:
+            df = df[df["stress_level"] == st.session_state.selected_stress]
+    
+    # Apply extraction range filter
+    if 'extraction_range' in st.session_state:
+        min_ext, max_ext = st.session_state.extraction_range
+        if "extraction_pct" in df.columns:
+            df = df[(df["extraction_pct"] >= min_ext) & (df["extraction_pct"] <= max_ext)]
+    
+    return df
+
+def filter_water_quality_data():
+    df = water_quality.copy()
+    if df.empty:
+        return df
+    
+    # Apply state filter
+    if 'selected_wq_state' in st.session_state and st.session_state.selected_wq_state != "All States":
+        if "state_name" in df.columns:
+            df = df[df["state_name"] == st.session_state.selected_wq_state]
+    
+    # Apply district filter
+    if 'selected_wq_district' in st.session_state and st.session_state.selected_wq_district != "All Districts":
+        if "district_name" in df.columns:
+            df = df[df["district_name"] == st.session_state.selected_wq_district]
+    
+    # Apply pH range filter
+    if 'ph_range' in st.session_state:
+        min_ph, max_ph = st.session_state.ph_range
+        if "ph_level" in df.columns:
+            df = df[(df["ph_level"] >= min_ph) & (df["ph_level"] <= max_ph)]
+    
+    # Apply DO range filter
+    if 'do_range' in st.session_state:
+        min_do, max_do = st.session_state.do_range
+        if "dissolved_oxygen_mg_l" in df.columns:
+            df = df[(df["dissolved_oxygen_mg_l"] >= min_do) & (df["dissolved_oxygen_mg_l"] <= max_do)]
+    
+    # Apply status filter
+    if 'selected_status' in st.session_state and st.session_state.selected_status != "All Status":
+        if "status" in df.columns:
+            df = df[df["status"] == st.session_state.selected_status]
+    
+    return df
+
+# Apply all filters
+filtered_sources = filter_sources_data()
+filtered_rainfall = filter_rainfall_data()
+filtered_groundwater = filter_groundwater_data()
+filtered_water_quality = filter_water_quality_data()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER + KPIs
@@ -1168,15 +637,19 @@ filtered_sources = apply_source_filters()
 st.markdown(f"<h1 style='color:#00e5ff'>💧 AQUASTAT</h1>", unsafe_allow_html=True)
 st.markdown(f"<p>National Water Command Center • Live Intelligence • {current_time.strftime('%Y-%m-%d %H:%M:%S IST')}</p>", unsafe_allow_html=True)
 
-total_cap = filtered_sources["capacity_percent"].mean() if not filtered_sources.empty and "capacity_percent" in filtered_sources.columns else 0
-critical_n = len(filtered_sources[filtered_sources["capacity_percent"] < 30]) if not filtered_sources.empty and "capacity_percent" in filtered_sources.columns else 0
+# Calculate KPIs based on filtered data
+total_sources = len(filtered_sources)
+avg_capacity = filtered_sources["capacity_percent"].mean() if not filtered_sources.empty and "capacity_percent" in filtered_sources.columns else 0
+critical_sources = len(filtered_sources[filtered_sources["capacity_percent"] < 30]) if not filtered_sources.empty and "capacity_percent" in filtered_sources.columns else 0
+active_alerts = len(alerts[alerts["alert_status"] == "CRITICAL"]) if not alerts.empty and "alert_status" in alerts.columns else 0
+gw_records = len(filtered_groundwater)
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Total Sources", len(sources) if not sources.empty else 0)
-k2.metric("Avg Capacity", f"{total_cap:.1f}%" if total_cap else "0%")
-k3.metric("Critical Sources", critical_n)
-k4.metric("Active Alerts", len(alerts) if not alerts.empty else 0)
-k5.metric("GW Records", len(groundwater) if not groundwater.empty else 0)
+k1.metric("Total Sources", total_sources)
+k2.metric("Avg Capacity", f"{avg_capacity:.1f}%" if avg_capacity else "0%")
+k3.metric("Critical Sources", critical_sources)
+k4.metric("Critical Alerts", active_alerts)
+k5.metric("GW Records", gw_records)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN TABS
@@ -1185,128 +658,354 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Dashboard", "🗺️ Map Vie
 
 # TAB 1: DASHBOARD
 with tab1:
-    if filtered_sources.empty:
-        st.warning("No data available for the selected filters")
+    st.markdown("### 📊 Water Resources Dashboard")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Source Distribution by Type
+        st.markdown("#### 💧 Water Sources by Type")
+        if not filtered_sources.empty and "source_type" in filtered_sources.columns:
+            type_counts = filtered_sources['source_type'].value_counts()
+            if not type_counts.empty:
+                fig = px.pie(
+                    values=type_counts.values, 
+                    names=type_counts.index, 
+                    title="Source Distribution",
+                    color_discrete_sequence=px.colors.sequential.Teal
+                )
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No data available")
+        else:
+            st.info("No source type data available")
+        
+        # Capacity Distribution Histogram
+        st.markdown("#### 📈 Capacity Distribution")
+        if not filtered_sources.empty and "capacity_percent" in filtered_sources.columns:
+            fig = px.histogram(
+                filtered_sources, 
+                x="capacity_percent", 
+                nbins=20,
+                title="Water Source Capacity Distribution",
+                color_discrete_sequence=['#00e5ff']
+            )
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            fig.add_vline(x=30, line_dash="dash", line_color="red", annotation_text="Critical")
+            fig.add_vline(x=60, line_dash="dash", line_color="orange", annotation_text="Moderate")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No capacity data available")
+    
+    with col2:
+        # Risk Level Distribution
+        st.markdown("#### ⚠️ Risk Assessment")
+        if not filtered_sources.empty and "risk_level" in filtered_sources.columns:
+            risk_counts = filtered_sources['risk_level'].value_counts()
+            if not risk_counts.empty:
+                colors = {'Critical': '#ff4444', 'Moderate': '#ffd700', 'Good': '#00ff9d'}
+                fig = px.bar(
+                    x=risk_counts.index, 
+                    y=risk_counts.values, 
+                    title="Risk Level Distribution",
+                    color=risk_counts.index,
+                    color_discrete_map=colors
+                )
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No risk data available")
+        else:
+            st.info("No risk level data available")
+        
+        # Top 10 Sources by Capacity
+        st.markdown("#### 🏆 Top 10 Sources by Capacity")
+        if not filtered_sources.empty and "capacity_percent" in filtered_sources.columns and "source_name" in filtered_sources.columns:
+            top_sources = filtered_sources.nlargest(10, "capacity_percent")[["source_name", "source_type", "capacity_percent"]]
+            fig = px.bar(
+                top_sources,
+                x="capacity_percent",
+                y="source_name",
+                orientation='h',
+                title="Top Performing Sources",
+                color="capacity_percent",
+                color_continuous_scale="Viridis"
+            )
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No source data available")
+    
+    # Recent Data Table
+    st.markdown("#### 📋 Filtered Water Sources Data")
+    if not filtered_sources.empty:
+        st.dataframe(filtered_sources.head(50), use_container_width=True)
     else:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Water Sources by Type")
-            if 'source_type' in filtered_sources.columns:
-                type_counts = filtered_sources['source_type'].value_counts()
-                if not type_counts.empty:
-                    fig = px.pie(values=type_counts.values, names=type_counts.index, title="Source Distribution")
-                    st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.subheader("Risk Level Distribution")
-            if 'risk_level' in filtered_sources.columns:
-                risk_counts = filtered_sources['risk_level'].value_counts()
-                if not risk_counts.empty:
-                    fig = px.bar(x=risk_counts.index, y=risk_counts.values, title="Risk Assessment", color=risk_counts.index)
-                    st.plotly_chart(fig, use_container_width=True)
-        
-        st.subheader("Water Sources Data")
-        st.dataframe(filtered_sources, use_container_width=True)
+        st.warning("No data available for selected filters")
 
 # TAB 2: MAP VIEW
 with tab2:
-    st.subheader("Interactive Water Resources Map")
+    st.subheader("🗺️ Interactive Water Resources Map")
     
-    # Check if latitude and longitude columns exist
-    if 'latitude' in filtered_sources.columns and 'longitude' in filtered_sources.columns:
+    if not filtered_sources.empty and "latitude" in filtered_sources.columns and "longitude" in filtered_sources.columns:
         map_sources = filtered_sources[filtered_sources["latitude"].notna() & filtered_sources["longitude"].notna()].copy()
         
         if not map_sources.empty:
             center_lat = map_sources["latitude"].mean()
             center_lon = map_sources["longitude"].mean()
-            m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=6, tiles="CartoDB dark_matter")
             
-            cluster = MarkerCluster().add_to(m) if show_clusters else m
-            for _, row in map_sources.iterrows():
-                capacity = row.get("capacity_percent", 100)
-                if pd.isna(capacity):
-                    capacity = 100
-                color = "red" if capacity < 30 else "orange" if capacity < 60 else "green"
-                popup_text = f"{row.get('source_name', 'Unknown')}<br>Capacity: {capacity:.1f}%"
-                folium.CircleMarker(
-                    [row["latitude"], row["longitude"]], 
-                    radius=marker_size, 
-                    color=color, 
-                    fill=True,
-                    popup=popup_text
-                ).add_to(cluster)
+            # Add heatmap layer if enabled
+            if st.session_state.get("show_heatmap", False):
+                heat_data = [[row["latitude"], row["longitude"], row.get("capacity_percent", 50)] 
+                           for _, row in map_sources.iterrows()]
+                HeatMap(heat_data).add_to(m)
+            
+            # Add marker cluster if enabled
+            if show_clusters:
+                marker_cluster = MarkerCluster().add_to(m)
+                for _, row in map_sources.iterrows():
+                    capacity = row.get("capacity_percent", 100)
+                    if pd.isna(capacity):
+                        capacity = 100
+                    color = "red" if capacity < 30 else "orange" if capacity < 60 else "green"
+                    
+                    popup_text = f"""
+                    <b>{row.get('source_name', 'Unknown')}</b><br>
+                    Type: {row.get('source_type', 'N/A')}<br>
+                    Capacity: {capacity:.1f}%<br>
+                    District: {row.get('district', 'N/A')}
+                    """
+                    
+                    folium.CircleMarker(
+                        [row["latitude"], row["longitude"]], 
+                        radius=marker_size, 
+                        color=color, 
+                        fill=True,
+                        fill_opacity=0.7,
+                        popup=popup_text
+                    ).add_to(marker_cluster)
+            else:
+                for _, row in map_sources.iterrows():
+                    capacity = row.get("capacity_percent", 100)
+                    if pd.isna(capacity):
+                        capacity = 100
+                    color = "red" if capacity < 30 else "orange" if capacity < 60 else "green"
+                    
+                    popup_text = f"""
+                    <b>{row.get('source_name', 'Unknown')}</b><br>
+                    Type: {row.get('source_type', 'N/A')}<br>
+                    Capacity: {capacity:.1f}%
+                    """
+                    
+                    folium.CircleMarker(
+                        [row["latitude"], row["longitude"]], 
+                        radius=marker_size, 
+                        color=color, 
+                        fill=True,
+                        popup=popup_text
+                    ).add_to(m)
+            
+            # Add fullscreen button
+            Fullscreen().add_to(m)
             
             st_folium(m, width=1200, height=600)
         else:
             st.warning("No coordinates available for selected filters")
     else:
-        st.warning("Latitude/Longitude columns not available in the data")
+        st.warning("Latitude/Longitude data not available")
 
 # TAB 3: ANALYTICS
 with tab3:
-    st.subheader("Analytics Dashboard")
+    st.subheader("📈 Analytics Dashboard")
+    
     col1, col2 = st.columns(2)
+    
     with col1:
-        if not rainfall.empty and 'record_year' in rainfall.columns and 'rainfall_cm' in rainfall.columns:
-            rain_trend = rainfall.groupby('record_year')['rainfall_cm'].mean()
+        # Rainfall Trend
+        st.markdown("#### 🌧️ Rainfall Trend")
+        if not filtered_rainfall.empty and "record_year" in filtered_rainfall.columns and "rainfall_cm" in filtered_rainfall.columns:
+            rain_trend = filtered_rainfall.groupby('record_year')['rainfall_cm'].agg(['mean', 'min', 'max']).reset_index()
             if not rain_trend.empty:
-                fig = px.line(x=rain_trend.index, y=rain_trend.values, title="Rainfall Trend")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=rain_trend['record_year'], y=rain_trend['mean'], 
+                                        mode='lines+markers', name='Average', line=dict(color='#00e5ff', width=2)))
+                fig.add_trace(go.Scatter(x=rain_trend['record_year'], y=rain_trend['max'], 
+                                        mode='lines', name='Maximum', line=dict(color='#ff4444', width=1, dash='dash')))
+                fig.add_trace(go.Scatter(x=rain_trend['record_year'], y=rain_trend['min'], 
+                                        mode='lines', name='Minimum', line=dict(color='#00ff9d', width=1, dash='dash')))
+                fig.update_layout(title="Rainfall Trend Over Years", bgcolor='rgba(0,0,0,0)', 
+                                 paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No rainfall trend data")
         else:
             st.info("No rainfall data available")
-    with col2:
-        if not groundwater.empty and 'assessment_year' in groundwater.columns and 'avg_depth_meters' in groundwater.columns:
-            gw_trend = groundwater.groupby('assessment_year')['avg_depth_meters'].mean()
-            if not gw_trend.empty:
-                fig = px.line(x=gw_trend.index, y=gw_trend.values, title="Groundwater Depth Trend")
+        
+        # Seasonal Rainfall Pattern
+        st.markdown("#### 🌤️ Seasonal Rainfall Pattern")
+        if not filtered_rainfall.empty and "season" in filtered_rainfall.columns and "rainfall_cm" in filtered_rainfall.columns:
+            seasonal = filtered_rainfall.groupby('season')['rainfall_cm'].mean().reset_index()
+            if not seasonal.empty:
+                fig = px.bar(seasonal, x='season', y='rainfall_cm', title="Average Rainfall by Season",
+                            color='rainfall_cm', color_continuous_scale='Blues')
+                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No seasonal data")
+    
+    with col2:
+        # Groundwater Trend
+        st.markdown("#### 🌊 Groundwater Depth Trend")
+        if not filtered_groundwater.empty and "assessment_year" in filtered_groundwater.columns and "avg_depth_meters" in filtered_groundwater.columns:
+            gw_trend = filtered_groundwater.groupby('assessment_year')['avg_depth_meters'].mean().reset_index()
+            if not gw_trend.empty:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=gw_trend['assessment_year'], y=gw_trend['avg_depth_meters'], 
+                                        mode='lines+markers', name='Average Depth', 
+                                        line=dict(color='#00e5ff', width=2),
+                                        marker=dict(size=8, color='#ff4444')))
+                fig.update_layout(title="Groundwater Depth Trend (Deeper = Worse)",
+                                 yaxis_title="Depth (meters)", bgcolor='rgba(0,0,0,0)',
+                                 paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No groundwater trend data")
         else:
             st.info("No groundwater data available")
+        
+        # Extraction vs Recharge
+        st.markdown("#### 💧 Extraction vs Recharge Analysis")
+        if not filtered_groundwater.empty and "extraction_pct" in filtered_groundwater.columns and "recharge_rate_mcm" in filtered_groundwater.columns:
+            fig = go.Figure()
+            fig.add_trace(go.Bar(x=filtered_groundwater['district_name'].head(10), 
+                                y=filtered_groundwater['extraction_pct'].head(10), 
+                                name='Extraction %', marker_color='#ff4444'))
+            fig.add_trace(go.Bar(x=filtered_groundwater['district_name'].head(10), 
+                                y=filtered_groundwater['recharge_rate_mcm'].head(10) / 5, 
+                                name='Recharge Rate (scaled)', marker_color='#00ff9d'))
+            fig.update_layout(title="Extraction vs Recharge by District", barmode='group',
+                             bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No extraction/recharge data")
+    
+    # Correlation Heatmap
+    st.markdown("#### 🔥 Parameter Correlation Heatmap")
+    if not filtered_sources.empty and not filtered_groundwater.empty:
+        # Create correlation data
+        corr_data = pd.DataFrame()
+        if "capacity_percent" in filtered_sources.columns:
+            corr_data['capacity'] = filtered_sources['capacity_percent']
+        if not filtered_rainfall.empty and "rainfall_cm" in filtered_rainfall.columns:
+            corr_data['rainfall'] = filtered_rainfall['rainfall_cm'].head(len(corr_data)) if len(corr_data) > 0 else []
+        if not filtered_groundwater.empty and "avg_depth_meters" in filtered_groundwater.columns:
+            corr_data['gw_depth'] = filtered_groundwater['avg_depth_meters'].head(len(corr_data)) if len(corr_data) > 0 else []
+        
+        if len(corr_data.columns) > 1:
+            corr_matrix = corr_data.corr()
+            fig = px.imshow(corr_matrix, text_auto=True, aspect="auto", 
+                           title="Correlation Between Water Parameters",
+                           color_continuous_scale='RdBu')
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Insufficient data for correlation analysis")
+    else:
+        st.info("Need multiple parameters for correlation analysis")
 
 # TAB 4: WATER QUALITY
 with tab4:
-    st.subheader("Water Quality Monitoring")
-    if not water_quality.empty:
+    st.subheader("💧 Water Quality Monitoring")
+    
+    if not filtered_water_quality.empty:
         col1, col2, col3 = st.columns(3)
-        col1.metric("Avg pH", f"{water_quality['ph_level'].mean():.2f}" if 'ph_level' in water_quality else "N/A")
-        col2.metric("Avg Dissolved Oxygen", f"{water_quality['dissolved_oxygen_mg_l'].mean():.1f} mg/L" if 'dissolved_oxygen_mg_l' in water_quality else "N/A")
-        col3.metric("Active Stations", len(water_quality[water_quality['status'] == 'Active']) if 'status' in water_quality else 0)
-        st.dataframe(water_quality.head(100), use_container_width=True)
+        
+        avg_ph = filtered_water_quality['ph_level'].mean() if 'ph_level' in filtered_water_quality else 0
+        avg_do = filtered_water_quality['dissolved_oxygen_mg_l'].mean() if 'dissolved_oxygen_mg_l' in filtered_water_quality else 0
+        active_stations = len(filtered_water_quality[filtered_water_quality['status'] == 'Active']) if 'status' in filtered_water_quality else 0
+        
+        col1.metric("Avg pH", f"{avg_ph:.2f}", delta="Ideal: 6.5-8.5")
+        col2.metric("Avg Dissolved Oxygen", f"{avg_do:.1f} mg/L", delta="Good: >5 mg/L")
+        col3.metric("Active Stations", active_stations)
+        
+        # pH Distribution
+        st.markdown("#### 🧪 pH Level Distribution")
+        if 'ph_level' in filtered_water_quality.columns:
+            fig = px.histogram(filtered_water_quality, x='ph_level', nbins=20, 
+                              title="pH Level Distribution",
+                              color_discrete_sequence=['#00e5ff'])
+            fig.add_vline(x=6.5, line_dash="dash", line_color="green", annotation_text="Ideal Min")
+            fig.add_vline(x=8.5, line_dash="dash", line_color="green", annotation_text="Ideal Max")
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # DO vs pH Scatter
+        st.markdown("#### 📊 Dissolved Oxygen vs pH Analysis")
+        if 'dissolved_oxygen_mg_l' in filtered_water_quality.columns and 'ph_level' in filtered_water_quality.columns:
+            fig = px.scatter(filtered_water_quality, x='ph_level', y='dissolved_oxygen_mg_l',
+                            color='status', size='turbidity_ntu' if 'turbidity_ntu' in filtered_water_quality.columns else None,
+                            title="DO vs pH Relationship",
+                            labels={'ph_level': 'pH Level', 'dissolved_oxygen_mg_l': 'Dissolved Oxygen (mg/L)'})
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Water Quality Data Table
+        st.markdown("#### 📋 Water Quality Data")
+        st.dataframe(filtered_water_quality, use_container_width=True)
     else:
-        st.info("No water quality data available")
+        st.info("No water quality data available for selected filters")
 
 # TAB 5: ALERTS
 with tab5:
-    st.subheader("Active Alerts")
+    st.subheader("⚠️ Active Alerts and Warnings")
+    
     if not alerts.empty:
         critical = len(alerts[alerts['alert_status'] == 'CRITICAL']) if 'alert_status' in alerts else 0
         warning = len(alerts[alerts['alert_status'] == 'WARNING']) if 'alert_status' in alerts else 0
-        col1, col2 = st.columns(2)
+        info = len(alerts[alerts['alert_status'] == 'INFO']) if 'alert_status' in alerts else 0
+        
+        col1, col2, col3 = st.columns(3)
         col1.markdown(f"<div class='badge-critical'>🔴 CRITICAL: {critical}</div>", unsafe_allow_html=True)
         col2.markdown(f"<div class='badge-warning'>🟡 WARNING: {warning}</div>", unsafe_allow_html=True)
+        col3.markdown(f"<div class='badge-good'>🔵 INFO: {info}</div>", unsafe_allow_html=True)
+        
+        # Alert Timeline
+        if 'timestamp' in alerts.columns:
+            alerts['timestamp'] = pd.to_datetime(alerts['timestamp'])
+            alert_timeline = alerts.groupby([alerts['timestamp'].dt.date, 'alert_status']).size().reset_index(name='count')
+            fig = px.line(alert_timeline, x='timestamp', y='count', color='alert_status',
+                         title="Alert Timeline")
+            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#cfe4f7')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("#### 📋 Alert Details")
         st.dataframe(alerts, use_container_width=True)
     else:
-        st.success("No active alerts")
+        st.success("✅ No active alerts at this time")
 
 # TAB 6: SQL QUERIES
 with tab6:
-    st.subheader("SQL Query Workspace - Advanced Analytics")
+    st.subheader("🗄️ SQL Query Workspace")
     
     # Quick SQL Templates
     st.markdown("### 📋 Quick SQL Templates")
     template_queries = {
-        "Top 10 Water Sources by Capacity": "SELECT source_name, source_type, state, capacity_percent FROM water_sources ORDER BY capacity_percent DESC LIMIT 10",
-        "Critical Sources (<30% capacity)": "SELECT source_name, state, district, capacity_percent FROM water_sources WHERE capacity_percent < 30 ORDER BY capacity_percent",
+        "Top 10 Water Sources": "SELECT source_name, source_type, state, district, capacity_percent FROM water_sources ORDER BY capacity_percent DESC LIMIT 10",
+        "Critical Sources (<30%)": "SELECT source_name, state, district, capacity_percent FROM water_sources WHERE capacity_percent < 30 ORDER BY capacity_percent",
         "Average Rainfall by District": "SELECT district_name, ROUND(AVG(rainfall_cm), 2) as avg_rainfall FROM rainfall_history GROUP BY district_name ORDER BY avg_rainfall DESC",
-        "Groundwater Extraction Analysis": "SELECT district_name, ROUND(AVG(extraction_pct), 2) as avg_extraction FROM groundwater_levels GROUP BY district_name ORDER BY avg_extraction DESC",
+        "Groundwater Stress Analysis": "SELECT district_name, ROUND(AVG(avg_depth_meters), 2) as avg_depth, ROUND(AVG(extraction_pct), 2) as avg_extraction FROM groundwater_levels GROUP BY district_name ORDER BY avg_depth DESC",
         "Water Quality Summary": "SELECT state_name, ROUND(AVG(ph_level), 2) as avg_ph, ROUND(AVG(dissolved_oxygen_mg_l), 2) as avg_do FROM water_monitoring_stations GROUP BY state_name",
-        "Join Query - Sources with Usage": """
-            SELECT ws.source_name, ws.source_type, wu.sector, wu.consumption_mcm, wu.record_year
-            FROM water_sources ws
-            LEFT JOIN water_usage_history wu ON ws.source_id = wu.source_id
-            WHERE wu.consumption_mcm IS NOT NULL
-            ORDER BY wu.consumption_mcm DESC
-            LIMIT 20
+        "High Risk Districts": """
+            SELECT DISTINCT gw.district_name, 
+                   ROUND(AVG(gw.avg_depth_meters), 2) as avg_depth,
+                   ROUND(AVG(ws.capacity_percent), 2) as avg_capacity
+            FROM groundwater_levels gw
+            JOIN water_sources ws ON gw.district_name = ws.district
+            WHERE gw.avg_depth_meters > 30 OR ws.capacity_percent < 40
+            GROUP BY gw.district_name
+            ORDER BY avg_depth DESC
         """
     }
     
@@ -1315,7 +1014,9 @@ with tab6:
         st.session_state.custom_query = template_queries[selected_template]
     
     st.markdown("### ✍️ Custom SQL Query")
-    custom_query = st.text_area("Enter SQL Query:", height=200, value=st.session_state.get("custom_query", "SELECT * FROM water_sources LIMIT 50"), key="custom_query")
+    custom_query = st.text_area("Enter SQL Query:", height=150, 
+                                value=st.session_state.get("custom_query", "SELECT * FROM water_sources LIMIT 50"), 
+                                key="custom_query")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -1326,35 +1027,35 @@ with tab6:
                     st.error(f"Error: {error}")
                 else:
                     st.session_state.custom_results = results
-                    st.success(f"✅ Found {len(results)} records")
+                    st.success(f"✅ Query executed successfully! Found {len(results)} records")
                     st.code(custom_query, language="sql")
                     st.dataframe(results, use_container_width=True)
                     
                     if not results.empty:
                         csv = results.to_csv(index=False).encode('utf-8')
-                        st.download_button("📥 Download Results", csv, "query_results.csv", "text/csv")
+                        st.download_button("📥 Download Results as CSV", csv, "query_results.csv", "text/csv")
             else:
-                st.warning("Please enter a query")
+                st.warning("Please enter a SQL query")
     
     with col2:
-        if st.button("📊 Show Table Info", use_container_width=True):
-            try:
-                # Get table information
-                tables = ["water_sources", "water_monitoring_stations", "groundwater_levels", "rainfall_history", "active_alerts", "water_usage_history"]
-                info_text = "### Available Tables:\n"
-                for tbl in tables:
-                    info_text += f"- `{tbl}`\n"
-                st.markdown(info_text)
-                st.info("Use these table names in your SQL queries. Check column names using: SELECT * FROM table_name LIMIT 1")
-            except:
-                st.warning("Could not fetch table information")
+        if st.button("📊 Show Table Schema", use_container_width=True):
+            st.markdown("### Available Tables:")
+            tables_info = """
+            - `water_sources` - Water source information (capacity, location, type)
+            - `water_monitoring_stations` - Water quality monitoring data (pH, DO, turbidity)
+            - `groundwater_levels` - Groundwater depth, extraction, recharge rates
+            - `rainfall_history` - Historical rainfall data by district and season
+            - `active_alerts` - Current alerts and warnings
+            - `water_usage_history` - Water consumption by sector
+            """
+            st.info(tables_info)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FOOTER
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown(f"<p style='text-align:center'>AQUASTAT v4.0 • Advanced SQL Analytics • Updated: {current_time.strftime('%Y-%m-%d %H:%M IST')}</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align:center'>AQUASTAT v4.0 • Advanced Water Management System • Updated: {current_time.strftime('%Y-%m-%d %H:%M IST')}</p>", unsafe_allow_html=True)
 
-if st.button("🔄 Refresh Data"):
+if st.button("🔄 Refresh All Data"):
     st.cache_data.clear()
     st.rerun()
