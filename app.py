@@ -101,7 +101,6 @@ def execute_query(query, params=None):
                 df = pd.read_sql(query, conn)
         return df
     except Exception as e:
-        # Return demo data on error
         return get_demo_data(query)
 
 def get_demo_data(query):
@@ -150,7 +149,7 @@ def get_demo_data(query):
         return pd.DataFrame({'message': ['Demo data']})
 
 # =============================================================================
-# SQL QUERY BUILDERS (Simplified - No ROUND function issues)
+# SQL QUERY BUILDERS
 # =============================================================================
 
 def get_water_sources_query(state=None, district=None, source_type=None, min_cap=0, max_cap=100, risk=None):
@@ -344,103 +343,103 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # ========== SECTION 1: WATER SOURCE FILTERS ==========
+    # SECTION 1: WATER SOURCE FILTERS
     with st.expander("🏭 WATER SOURCE FILTERS", expanded=True):
-        state_filter = st.selectbox("State", ["All States", "State A", "State B", "State C", "State D"], key="state")
-        district_filter = st.selectbox("District", ["All Districts", "North", "South", "East", "West", "Central"], key="district")
-        source_type_filter = st.selectbox("Source Type", ["All Types", "River", "Reservoir", "Lake", "Well", "Canal"], key="source_type")
+        state_filter = st.selectbox("State", ["All States", "State A", "State B", "State C", "State D"])
+        district_filter = st.selectbox("District", ["All Districts", "North", "South", "East", "West", "Central"])
+        source_type_filter = st.selectbox("Source Type", ["All Types", "River", "Reservoir", "Lake", "Well", "Canal"])
         
         col1, col2 = st.columns(2)
         with col1:
-            min_capacity = st.number_input("Min Capacity %", 0, 100, 0, key="min_cap")
+            min_capacity = st.number_input("Min Capacity %", 0, 100, 0)
         with col2:
-            max_capacity = st.number_input("Max Capacity %", 0, 100, 100, key="max_cap")
+            max_capacity = st.number_input("Max Capacity %", 0, 100, 100)
         
-        risk_filter = st.selectbox("Risk Level", ["All Risk Levels", "Critical", "Moderate", "Good"], key="risk")
+        risk_filter = st.selectbox("Risk Level", ["All Risk Levels", "Critical", "Moderate", "Good"])
     
-    # ========== SECTION 2: RAINFALL FILTERS ==========
+    # SECTION 2: RAINFALL FILTERS
     with st.expander("🌧️ RAINFALL FILTERS", expanded=True):
-        rain_district = st.selectbox("Rainfall District", ["All Districts", "North", "South", "East", "West", "Central"], key="rain_dist")
-        rain_year = st.selectbox("Year", ["All Years", 2020, 2021, 2022, 2023, 2024], key="rain_year")
-        rain_season = st.selectbox("Season", ["All Seasons", "Winter", "Summer", "Monsoon", "Post-Monsoon"], key="rain_season")
+        rain_district = st.selectbox("Rainfall District", ["All Districts", "North", "South", "East", "West", "Central"])
+        rain_year = st.selectbox("Year", ["All Years", 2020, 2021, 2022, 2023, 2024])
+        rain_season = st.selectbox("Season", ["All Seasons", "Winter", "Summer", "Monsoon", "Post-Monsoon"])
         
         col1, col2 = st.columns(2)
         with col1:
-            min_rainfall = st.number_input("Min Rainfall (cm)", 0, 500, 0, key="min_rain")
+            min_rainfall = st.number_input("Min Rainfall (cm)", 0, 500, 0)
         with col2:
-            max_rainfall = st.number_input("Max Rainfall (cm)", 0, 500, 500, key="max_rain")
+            max_rainfall = st.number_input("Max Rainfall (cm)", 0, 500, 500)
         
-        rain_category = st.selectbox("Rainfall Category", ["All Categories", "Low", "Moderate", "High", "Extreme"], key="rain_cat")
+        rain_category = st.selectbox("Rainfall Category", ["All Categories", "Low", "Moderate", "High", "Extreme"])
     
-    # ========== SECTION 3: GROUNDWATER FILTERS ==========
+    # SECTION 3: GROUNDWATER FILTERS
     with st.expander("🌊 GROUNDWATER FILTERS", expanded=True):
-        gw_district = st.selectbox("GW District", ["All Districts", "North", "South", "East", "West", "Central"], key="gw_dist")
-        gw_year = st.selectbox("Assessment Year", ["All Years", 2020, 2021, 2022, 2023, 2024], key="gw_year")
+        gw_district = st.selectbox("GW District", ["All Districts", "North", "South", "East", "West", "Central"])
+        gw_year = st.selectbox("Assessment Year", ["All Years", 2020, 2021, 2022, 2023, 2024])
         
         col1, col2 = st.columns(2)
         with col1:
-            min_depth = st.number_input("Min Depth (m)", 0, 100, 0, key="min_depth")
+            min_depth = st.number_input("Min Depth (m)", 0, 100, 0)
         with col2:
-            max_depth = st.number_input("Max Depth (m)", 0, 100, 100, key="max_depth")
+            max_depth = st.number_input("Max Depth (m)", 0, 100, 100)
         
-        stress_level = st.selectbox("Stress Level", ["All Levels", "Low", "Moderate", "High", "Critical"], key="stress")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_extraction = st.number_input("Min Extraction %", 0, 100, 0, key="min_ext")
-        with col2:
-            max_extraction = st.number_input("Max Extraction %", 0, 100, 100, key="max_ext")
+        stress_level = st.selectbox("Stress Level", ["All Levels", "Low", "Moderate", "High", "Critical"])
         
         col1, col2 = st.columns(2)
         with col1:
-            min_recharge = st.number_input("Min Recharge (MCM)", 0, 1000, 0, key="min_rech")
+            min_extraction = st.number_input("Min Extraction %", 0, 100, 0)
         with col2:
-            max_recharge = st.number_input("Max Recharge (MCM)", 0, 1000, 1000, key="max_rech")
+            max_extraction = st.number_input("Max Extraction %", 0, 100, 100)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            min_recharge = st.number_input("Min Recharge (MCM)", 0, 1000, 0)
+        with col2:
+            max_recharge = st.number_input("Max Recharge (MCM)", 0, 1000, 1000)
     
-    # ========== SECTION 4: WATER QUALITY FILTERS ==========
+    # SECTION 4: WATER QUALITY FILTERS
     with st.expander("💧 WATER QUALITY FILTERS", expanded=True):
-        wq_state = st.selectbox("WQ State", ["All States", "State A", "State B", "State C", "State D"], key="wq_state")
-        wq_district = st.selectbox("WQ District", ["All Districts", "North", "South", "East", "West", "Central"], key="wq_dist")
+        wq_state = st.selectbox("WQ State", ["All States", "State A", "State B", "State C", "State D"])
+        wq_district = st.selectbox("WQ District", ["All Districts", "North", "South", "East", "West", "Central"])
         
         col1, col2 = st.columns(2)
         with col1:
-            min_ph = st.slider("Min pH", 0.0, 14.0, 0.0, 0.1, key="min_ph")
+            min_ph = st.slider("Min pH", 0.0, 14.0, 0.0, 0.1)
         with col2:
-            max_ph = st.slider("Max pH", 0.0, 14.0, 14.0, 0.1, key="max_ph")
+            max_ph = st.slider("Max pH", 0.0, 14.0, 14.0, 0.1)
         
         col1, col2 = st.columns(2)
         with col1:
-            min_do = st.slider("Min DO (mg/L)", 0.0, 15.0, 0.0, 0.1, key="min_do")
+            min_do = st.slider("Min DO (mg/L)", 0.0, 15.0, 0.0, 0.1)
         with col2:
-            max_do = st.slider("Max DO (mg/L)", 0.0, 15.0, 15.0, 0.1, key="max_do")
+            max_do = st.slider("Max DO (mg/L)", 0.0, 15.0, 15.0, 0.1)
         
         col1, col2 = st.columns(2)
         with col1:
-            min_turbidity = st.number_input("Min Turbidity (NTU)", 0, 100, 0, key="min_turb")
+            min_turbidity = st.number_input("Min Turbidity (NTU)", 0, 100, 0)
         with col2:
-            max_turbidity = st.number_input("Max Turbidity (NTU)", 0, 100, 100, key="max_turb")
+            max_turbidity = st.number_input("Max Turbidity (NTU)", 0, 100, 100)
         
-        station_status = st.selectbox("Station Status", ["All Status", "Active", "Maintenance", "Inactive"], key="status")
+        station_status = st.selectbox("Station Status", ["All Status", "Active", "Maintenance", "Inactive"])
     
-    # ========== SECTION 5: ADVANCED ANALYTICS FILTERS ==========
+    # SECTION 5: ADVANCED ANALYTICS FILTERS
     with st.expander("📊 ADVANCED ANALYTICS FILTERS", expanded=True):
         col1, col2 = st.columns(2)
         with col1:
-            start_year = st.selectbox("Start Year", [2020, 2021, 2022, 2023, 2024], index=0, key="start_year")
+            start_year = st.selectbox("Start Year", [2020, 2021, 2022, 2023, 2024], index=0)
         with col2:
-            end_year = st.selectbox("End Year", [2020, 2021, 2022, 2023, 2024], index=4, key="end_year")
+            end_year = st.selectbox("End Year", [2020, 2021, 2022, 2023, 2024], index=4)
         
-        alert_sensitivity = st.select_slider("Alert Sensitivity", options=["Low", "Medium", "High", "Critical"], value="Medium", key="alert_sens")
+        alert_sensitivity = st.select_slider("Alert Sensitivity", options=["Low", "Medium", "High", "Critical"], value="Medium")
     
-    # ========== SECTION 6: MAP SETTINGS ==========
+    # SECTION 6: MAP SETTINGS
     with st.expander("🗺️ MAP SETTINGS", expanded=True):
-        show_heatmap = st.checkbox("Show Heatmap", False, key="heatmap")
-        show_clusters = st.checkbox("Show Marker Clusters", True, key="clusters")
-        marker_size = st.slider("Marker Size", 5, 20, 10, key="marker_size")
-        map_zoom = st.slider("Map Zoom Level", 4, 12, 6, key="map_zoom")
+        show_heatmap = st.checkbox("Show Heatmap", False)
+        show_clusters = st.checkbox("Show Marker Clusters", True)
+        marker_size = st.slider("Marker Size", 5, 20, 10)
+        map_zoom = st.slider("Map Zoom Level", 4, 12, 6)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-EXECUTE SQL QUERIES BASED ON FILTERS
+# AUTO-EXECUTE SQL QUERIES
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Execute Water Sources Query
@@ -488,7 +487,7 @@ st.session_state.alerts_data = execute_query(alert_query, alert_params)
 # ─────────────────────────────────────────────────────────────────────────────
 current_time = datetime.now(pytz.timezone("Asia/Kolkata"))
 
-st.markdown(f"<h1 style='color:#00e5ff'>💧 AQUASTAT</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00e5ff'>💧 AQUASTAT</h1>", unsafe_allow_html=True)
 st.markdown(f"<p>National Water Command Center • Live Intelligence • {current_time.strftime('%Y-%m-%d %H:%M:%S IST')}</p>", unsafe_allow_html=True)
 
 # KPIs
@@ -516,53 +515,45 @@ st.markdown("---")
 # ─────────────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "🗺️ Map View", "📈 Analytics", "💧 Water Quality", "⚠️ Alerts"])
 
-# ========== TAB 1: DASHBOARD ==========
+# TAB 1: DASHBOARD
 with tab1:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 🏭 Water Sources by Type")
+        st.subheader("🏭 Water Sources by Type")
         if sources_df is not None and not sources_df.empty and 'source_type' in sources_df.columns:
             type_counts = sources_df['source_type'].value_counts()
             if not type_counts.empty:
                 fig = px.pie(values=type_counts.values, names=type_counts.index, title="Source Distribution")
-                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                fig.update_layout(font=dict(color='#cfe4f7'))
                 st.plotly_chart(fig, use_container_width=True)
         
-        st.markdown("### 📈 Capacity Distribution")
+        st.subheader("📈 Capacity Distribution")
         if sources_df is not None and not sources_df.empty and 'capacity_percent' in sources_df.columns:
             fig = px.histogram(sources_df, x='capacity_percent', nbins=20, title="Capacity Distribution")
             fig.add_vline(x=30, line_dash="dash", line_color="red")
             fig.add_vline(x=60, line_dash="dash", line_color="orange")
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.markdown("### ⚠️ Risk Assessment")
+        st.subheader("⚠️ Risk Assessment")
         if sources_df is not None and not sources_df.empty and 'risk_level' in sources_df.columns:
             risk_counts = sources_df['risk_level'].value_counts()
             if not risk_counts.empty:
                 fig = px.bar(x=risk_counts.index, y=risk_counts.values, title="Risk Distribution", color=risk_counts.index)
-                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                fig.update_layout(font=dict(color='#cfe4f7'))
                 st.plotly_chart(fig, use_container_width=True)
         
-        st.markdown("### 🏆 Top Sources by Capacity")
+        st.subheader("🏆 Top Sources by Capacity")
         if sources_df is not None and not sources_df.empty and 'capacity_percent' in sources_df.columns:
             top_sources = sources_df.nlargest(5, 'capacity_percent')[['source_name', 'capacity_percent']]
             if not top_sources.empty:
                 fig = px.bar(top_sources, x='capacity_percent', y='source_name', orientation='h', title="Top 5 Sources")
-                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                fig.update_layout(font=dict(color='#cfe4f7'))
                 st.plotly_chart(fig, use_container_width=True)
     
-    st.markdown("### 📋 Filtered Water Sources Data")
+    st.subheader("📋 Filtered Water Sources Data")
     if sources_df is not None and not sources_df.empty:
         st.dataframe(sources_df, use_container_width=True)
 
-# ========== TAB 2: MAP VIEW ==========
+# TAB 2: MAP VIEW
 with tab2:
     st.subheader("🗺️ Interactive Water Resources Map")
     
@@ -597,38 +588,32 @@ with tab2:
     else:
         st.warning("Latitude/Longitude data not available")
 
-# ========== TAB 3: ANALYTICS ==========
+# TAB 3: ANALYTICS
 with tab3:
     st.subheader("📈 Analytics Dashboard")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 🌧️ Rainfall Trend")
+        st.subheader("🌧️ Rainfall Trend")
         if st.session_state.rain_trend is not None and not st.session_state.rain_trend.empty:
             fig = px.line(st.session_state.rain_trend, x='record_year', y='avg_rainfall', title="Average Rainfall Over Years", markers=True)
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
         
-        st.markdown("### 🌊 Groundwater Trend")
+        st.subheader("🌊 Groundwater Trend")
         if st.session_state.gw_trend is not None and not st.session_state.gw_trend.empty:
             fig = px.line(st.session_state.gw_trend, x='assessment_year', y='avg_depth', title="Groundwater Depth Trend", markers=True)
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.markdown("### 💧 Seasonal Rainfall Pattern")
+        st.subheader("💧 Seasonal Rainfall Pattern")
         if rainfall_df is not None and not rainfall_df.empty and 'season' in rainfall_df.columns:
             seasonal = rainfall_df.groupby('season')['rainfall_cm'].mean().reset_index()
             if not seasonal.empty:
                 fig = px.bar(seasonal, x='season', y='rainfall_cm', title="Average Rainfall by Season")
-                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                fig.update_layout(font=dict(color='#cfe4f7'))
                 st.plotly_chart(fig, use_container_width=True)
         
-        st.markdown("### 🔄 Extraction vs Recharge")
+        st.subheader("🔄 Extraction vs Recharge")
         if gw_df is not None and not gw_df.empty and 'district_name' in gw_df.columns:
             top_gw = gw_df.head(10)
             if not top_gw.empty:
@@ -636,11 +621,9 @@ with tab3:
                 fig.add_trace(go.Bar(name='Extraction %', x=top_gw['district_name'], y=top_gw['extraction_pct'], marker_color='#ff4444'))
                 fig.add_trace(go.Bar(name='Recharge Rate', x=top_gw['district_name'], y=top_gw['recharge_rate_mcm']/5, marker_color='#00ff9d'))
                 fig.update_layout(title="Extraction vs Recharge by District", barmode='group')
-                fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                fig.update_layout(font=dict(color='#cfe4f7'))
                 st.plotly_chart(fig, use_container_width=True)
 
-# ========== TAB 4: WATER QUALITY ==========
+# TAB 4: WATER QUALITY
 with tab4:
     st.subheader("💧 Water Quality Monitoring")
     
@@ -656,21 +639,19 @@ with tab4:
         col2.metric("Avg Dissolved Oxygen", f"{avg_do:.1f} mg/L")
         col3.metric("Active Stations", active)
         
-        st.markdown("### 🧪 pH Level Distribution")
+        st.subheader("🧪 pH Level Distribution")
         if 'ph_level' in wq_df.columns:
             fig = px.histogram(wq_df, x='ph_level', nbins=15, title="pH Distribution")
             fig.add_vline(x=6.5, line_dash="dash", line_color="green")
             fig.add_vline(x=8.5, line_dash="dash", line_color="green")
-            fig.update_layout(bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-            fig.update_layout(font=dict(color='#cfe4f7'))
             st.plotly_chart(fig, use_container_width=True)
         
-        st.markdown("### 📋 Water Quality Data")
+        st.subheader("📋 Water Quality Data")
         st.dataframe(wq_df, use_container_width=True)
     else:
         st.info("No water quality data available")
 
-# ========== TAB 5: ALERTS ==========
+# TAB 5: ALERTS
 with tab5:
     st.subheader("⚠️ Active Alerts")
     
@@ -684,7 +665,7 @@ with tab5:
         col1.markdown(f"<div class='badge-critical'>🔴 CRITICAL: {critical}</div>", unsafe_allow_html=True)
         col2.markdown(f"<div class='badge-warning'>🟡 WARNING: {warning}</div>", unsafe_allow_html=True)
         
-        st.markdown("### 📋 Alert Details")
+        st.subheader("📋 Alert Details")
         st.dataframe(alerts_df, use_container_width=True)
     else:
         st.success("✅ No active alerts at this time")
