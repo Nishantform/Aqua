@@ -3,675 +3,2456 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import folium
-from folium.plugins import MarkerCluster, HeatMap
+from folium.plugins import MarkerCluster, HeatMap, Fullscreen
 from streamlit_folium import st_folium
 from datetime import datetime
 import warnings
+from io import BytesIO
 from sqlalchemy import create_engine, text
 import pytz
+import hashlib
+import hmac
+import time
 
-warnings.filterwarnings("ignore")
+# Suppress warnings for cleaner output
+warnings.filterwarnings('ignore')
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -------------------------
 # PAGE CONFIG
-# ─────────────────────────────────────────────────────────────────────────────
+# -------------------------
 st.set_page_config(
-    page_title="AQUASTAT — National Water Command Center",
+    page_title="AQUASTAT - National Water Command Center",
     page_icon="💧",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CSS STYLING
-# ─────────────────────────────────────────────────────────────────────────────
+# -------------------------
+# CUSTOM CSS
+# -------------------------
 st.markdown("""
 <style>
-html, body, [data-testid="stAppViewContainer"] {
-    background: linear-gradient(160deg,#040d18 0%,#071525 60%,#0a1e30 100%);
-    color: #cfe4f7;
-}
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg,#06121f 0%,#081a2e 100%);
-    border-right: 1px solid #1a3550;
-}
-.filter-section {
-    background: rgba(10,30,48,0.4);
-    border: 1px solid rgba(0,200,255,0.15);
-    border-radius: 10px;
-    padding: 15px;
-    margin-bottom: 20px;
-}
-.filter-header {
-    color: #00e5ff;
-    font-size: 1rem;
-    font-weight: 600;
-    margin-bottom: 10px;
-    border-bottom: 1px solid rgba(0,200,255,0.3);
-    padding-bottom: 5px;
-}
-.kpi-card {
-    background: rgba(255,255,255,0.035);
-    border: 1px solid rgba(0,200,255,0.18);
-    border-radius: 14px;
-    padding: 15px;
-    text-align: center;
-}
-.kpi-value { color:#00e5ff; font-size: 1.8rem; font-weight: 700; }
-.badge-critical { background: #c0392b; color:#fff; padding:4px 12px; border-radius:20px; display:inline-block; }
-.badge-warning { background: #e67e22; color:#fff; padding:4px 12px; border-radius:20px; display:inline-block; }
+    /* Main container styling */
+    .main {
+        background: linear-gradient(135deg, #0a0f1e 0%, #0d1a2b 100%);
+        color: #e6f1ff;
+    }
+    
+    /* Custom metric cards */
+    .metric-card {
+        background: rgba(10, 25, 47, 0.7);
+        border: 1px solid #1e3a5f;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 10px 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(10px);
+    }
+    
+    /* Admin badge */
+    .admin-badge {
+        background: linear-gradient(135deg, #ff416c, #ff4b2b);
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        text-align: center;
+        display: inline-block;
+    }
+    
+    /* User badge */
+    .user-badge {
+        background: linear-gradient(135deg, #00b09b, #96c93d);
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        text-align: center;
+        display: inline-block;
+    }
+    
+    /* Alert badges */
+    .alert-critical {
+        background: linear-gradient(135deg, #ff416c, #ff4b2b);
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        text-align: center;
+        animation: pulse 2s infinite;
+    }
+    
+    .alert-warning {
+        background: linear-gradient(135deg, #f7971e, #ffd200);
+        color: black;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        text-align: center;
+    }
+    
+    .alert-good {
+        background: linear-gradient(135deg, #00b09b, #96c93d);
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        text-align: center;
+    }
+    
+    @keyframes pulse {
+        0% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.8; transform: scale(1.05); }
+        100% { opacity: 1; transform: scale(1); }
+    }
+    
+    /* Status indicators */
+    .status-dot {
+        height: 10px;
+        width: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+    }
+    
+    .status-critical { background-color: #ff4444; box-shadow: 0 0 10px #ff4444; }
+    .status-warning { background-color: #ffd700; box-shadow: 0 0 10px #ffd700; }
+    .status-good { background-color: #00ff9d; box-shadow: 0 0 10px #00ff9d; }
+    
+    /* Custom headers */
+    .section-header {
+        color: #00e5ff;
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 20px 0;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #1e3a5f;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+    }
+    
+    /* Data table styling */
+    .dataframe {
+        background: rgba(10, 25, 47, 0.9);
+        border: 1px solid #1e3a5f;
+        border-radius: 10px;
+        color: #e6f1ff;
+    }
+    
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #0a192f;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #1e3a5f;
+        border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #2b4b7a;
+    }
+    
+    /* Admin panel styling */
+    .admin-panel {
+        background: rgba(20, 30, 50, 0.9);
+        border: 2px solid #ff416c;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 10px 0;
+    }
+    
+    .admin-header {
+        color: #ff416c;
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin-bottom: 15px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DATABASE CONNECTION
-# ─────────────────────────────────────────────────────────────────────────────
-try:
-    NEON_URL = st.secrets["NEON_URL"]
-except:
-    NEON_URL = None
+# -------------------------
+# AUTHENTICATION SYSTEM
+# -------------------------
+
+def check_password():
+    """Returns `True` if the user is authenticated using Streamlit secrets."""
+    
+    def login_form():
+        """Form with widgets to login"""
+        with st.form("Login"):
+            st.markdown('<p class="section-header">🔐 Admin Login</p>', unsafe_allow_html=True)
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login")
+            
+            if submitted:
+                # Get credentials from secrets
+                try:
+                    admin_username = st.secrets["ADMIN_USERNAME"]
+                    admin_password = st.secrets["ADMIN_PASSWORD"]
+                except Exception as e:
+                    st.error(f"Admin credentials not configured in secrets: {e}")
+                    return False
+                
+                # Use constant-time comparison
+                if hmac.compare_digest(username, admin_username) and \
+                   hmac.compare_digest(password, admin_password):
+                    st.session_state["authenticated"] = True
+                    st.session_state["username"] = username
+                    st.session_state["is_admin"] = True
+                    st.session_state["auth_time"] = datetime.now().timestamp()
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+                    return False
+        return False
+    
+    def logout():
+        if st.button("Logout"):
+            # Clear all session state
+            for key in ["authenticated", "is_admin", "username", "auth_time"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+    
+    # Check if already authenticated (with timeout)
+    if st.session_state.get("authenticated", False):
+        # Check session timeout (8 hours)
+        auth_time = st.session_state.get("auth_time", 0)
+        if datetime.now().timestamp() - auth_time > 28800:  # 8 hours
+            logout()
+            return False
+        
+        # Show logout button in sidebar
+        with st.sidebar:
+            st.markdown("---")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f'<span class="admin-badge">👑 Admin: {st.session_state.get("username", "")}</span>', unsafe_allow_html=True)
+            with col2:
+                logout()
+        return True
+    else:
+        # Show login form
+        with st.sidebar:
+            st.markdown("---")
+            login_form()
+        return False
+
+# -------------------------
+# NEON CLOUD DATABASE CONNECTION
+# -------------------------
+
+# Secure way to load the URL from Streamlit secrets
+NEON_URL = st.secrets["NEON_URL"]
 
 @st.cache_resource
 def init_connection():
-    if NEON_URL is None:
-        return None
+    """Initialize Neon PostgreSQL database connection using SQLAlchemy"""
     try:
-        engine = create_engine(NEON_URL, pool_pre_ping=True)
+        # Create SQLAlchemy engine with proper transaction handling
+        engine = create_engine(
+            NEON_URL,
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=30,
+            pool_recycle=1800,
+            pool_pre_ping=True,  # Test connections before using
+            connect_args={
+                'connect_timeout': 10,
+                'keepalives': 1,
+                'keepalives_idle': 30,
+                'keepalives_interval': 10,
+                'keepalives_count': 5,
+                'sslmode': 'require'
+            }
+        )
+        # Test connection with proper transaction handling
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1")).fetchone()
+            # Use a transaction context manager
+            with conn.begin():
+                result = conn.execute(text("SELECT 1"))
+                result.fetchone()
         return engine
     except Exception as e:
-        st.warning(f"Database connection failed. Using demo data.")
+        st.error(f"⚠️ Cloud Database connection failed: {e}")
         return None
 
+# Initialize engine
 engine = init_connection()
 
-def execute_query(query, params=None):
-    """Execute SQL query and return dataframe"""
+# -------------------------
+# DATABASE OPERATIONS (CRUD)
+# -------------------------
+
+def execute_query(query, params=None, commit=False):
+    """Execute a SQL query with parameters - with proper transaction handling"""
     if engine is None:
-        return get_demo_data(query)
+        st.error("Database connection not available")
+        return None
+    
     try:
         with engine.connect() as conn:
-            if params:
-                if isinstance(params, list):
-                    params = tuple(params)
-                df = pd.read_sql(query, conn, params=params)
-            else:
-                df = pd.read_sql(query, conn)
-        return df
+            # Use transaction context manager for proper commit/rollback
+            with conn.begin():
+                if params:
+                    result = conn.execute(text(query), params)
+                else:
+                    result = conn.execute(text(query))
+                
+                if commit:
+                    # Transaction will auto-commit on successful block completion
+                    return True
+                else:
+                    # For SELECT queries, fetch results within the transaction
+                    if result.returns_rows:
+                        return result.fetchall()
+                    return None
     except Exception as e:
-        return get_demo_data(query)
+        st.error(f"Database error: {e}")
+        # Transaction will auto-rollback on exception
+        return None
 
-def get_demo_data(query):
-    """Return demo data based on query type"""
-    np.random.seed(42)
+def test_connection():
+    """Test database connection and return status"""
+    if engine is None:
+        return False, "No engine"
     
-    if "water_sources" in query.lower():
-        return pd.DataFrame({
-            'source_name': [f'Source_{i}' for i in range(1, 21)],
-            'source_type': np.random.choice(['River', 'Reservoir', 'Lake', 'Well', 'Canal'], 20),
-            'state': np.random.choice(['State A', 'State B', 'State C', 'State D'], 20),
-            'district': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 20),
-            'capacity_percent': np.random.randint(20, 100, 20),
-            'latitude': np.random.uniform(8, 37, 20),
-            'longitude': np.random.uniform(68, 97, 20),
-            'risk_level': np.random.choice(['Critical', 'Moderate', 'Good'], 20)
-        })
-    elif "rainfall" in query.lower():
-        return pd.DataFrame({
-            'district_name': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 50),
-            'rainfall_cm': np.random.uniform(20, 350, 50),
-            'record_year': np.random.choice([2020, 2021, 2022, 2023, 2024], 50),
-            'season': np.random.choice(['Winter', 'Summer', 'Monsoon', 'Post-Monsoon'], 50),
-            'rainfall_category': np.random.choice(['Low', 'Moderate', 'High', 'Extreme'], 50)
-        })
-    elif "groundwater" in query.lower():
-        return pd.DataFrame({
-            'district_name': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 40),
-            'avg_depth_meters': np.random.uniform(15, 55, 40),
-            'extraction_pct': np.random.uniform(35, 85, 40),
-            'recharge_rate_mcm': np.random.uniform(150, 450, 40),
-            'assessment_year': np.random.choice([2020, 2021, 2022, 2023, 2024], 40),
-            'stress_level': np.random.choice(['Low', 'Moderate', 'High', 'Critical'], 40)
-        })
-    elif "water_monitoring" in query.lower() or "water_quality" in query.lower():
-        return pd.DataFrame({
-            'station_name': [f'Station_{i}' for i in range(1, 16)],
-            'state_name': np.random.choice(['State A', 'State B', 'State C', 'State D'], 15),
-            'district_name': np.random.choice(['North', 'South', 'East', 'West', 'Central'], 15),
-            'ph_level': np.random.uniform(6.2, 8.8, 15),
-            'dissolved_oxygen_mg_l': np.random.uniform(3.5, 8.5, 15),
-            'turbidity_ntu': np.random.uniform(1, 25, 15),
-            'status': np.random.choice(['Active', 'Maintenance', 'Inactive'], 15, p=[0.7, 0.2, 0.1])
-        })
+    try:
+        with engine.connect() as conn:
+            with conn.begin():
+                result = conn.execute(text("SELECT current_database(), current_user, version()"))
+                db_name, db_user, version = result.fetchone()
+                return True, f"Connected to: {db_name} as {db_user}"
+    except Exception as e:
+        return False, str(e)
+
+# Test connection and show in sidebar
+conn_status, conn_message = test_connection()
+with st.sidebar:
+    if conn_status:
+        st.success(f"✅ {conn_message}")
     else:
-        return pd.DataFrame({'message': ['Demo data']})
+        st.error(f"❌ Connection failed: {conn_message}")
 
-# =============================================================================
-# SQL QUERY BUILDERS
-# =============================================================================
-
-def get_water_sources_query(state=None, district=None, source_type=None, min_cap=0, max_cap=100, risk=None):
-    query = "SELECT * FROM water_sources WHERE 1=1"
-    params = []
-    
-    if state and state != "All States":
-        query += " AND state = %s"
-        params.append(state)
-    if district and district != "All Districts":
-        query += " AND district = %s"
-        params.append(district)
-    if source_type and source_type != "All Types":
-        query += " AND source_type = %s"
-        params.append(source_type)
-    if min_cap > 0 or max_cap < 100:
-        query += " AND capacity_percent >= %s AND capacity_percent <= %s"
-        params.extend([min_cap, max_cap])
-    if risk and risk != "All Risk Levels":
-        query += " AND risk_level = %s"
-        params.append(risk)
-    
-    query += " ORDER BY capacity_percent DESC"
-    return query, params
-
-def get_rainfall_query(district=None, year=None, season=None, min_rain=0, max_rain=500, category=None):
-    query = "SELECT * FROM rainfall_history WHERE 1=1"
-    params = []
-    
-    if district and district != "All Districts":
-        query += " AND district_name = %s"
-        params.append(district)
-    if year and year != "All Years" and year is not None:
-        query += " AND record_year = %s"
-        params.append(int(year))
-    if season and season != "All Seasons":
-        query += " AND season = %s"
-        params.append(season)
-    if min_rain > 0 or max_rain < 500:
-        query += " AND rainfall_cm >= %s AND rainfall_cm <= %s"
-        params.extend([float(min_rain), float(max_rain)])
-    if category and category != "All Categories":
-        query += " AND rainfall_category = %s"
-        params.append(category)
-    
-    query += " ORDER BY record_year DESC, rainfall_cm DESC"
-    return query, params
-
-def get_groundwater_query(district=None, year=None, min_depth=0, max_depth=100, stress=None, min_ext=0, max_ext=100, min_recharge=0, max_recharge=1000):
-    query = "SELECT * FROM groundwater_levels WHERE 1=1"
-    params = []
-    
-    if district and district != "All Districts":
-        query += " AND district_name = %s"
-        params.append(district)
-    if year and year != "All Years" and year is not None:
-        query += " AND assessment_year = %s"
-        params.append(int(year))
-    if min_depth > 0 or max_depth < 100:
-        query += " AND avg_depth_meters >= %s AND avg_depth_meters <= %s"
-        params.extend([float(min_depth), float(max_depth)])
-    if stress and stress != "All Levels":
-        query += " AND stress_level = %s"
-        params.append(stress)
-    if min_ext > 0 or max_ext < 100:
-        query += " AND extraction_pct >= %s AND extraction_pct <= %s"
-        params.extend([float(min_ext), float(max_ext)])
-    if min_recharge > 0 or max_recharge < 1000:
-        query += " AND recharge_rate_mcm >= %s AND recharge_rate_mcm <= %s"
-        params.extend([float(min_recharge), float(max_recharge)])
-    
-    query += " ORDER BY assessment_year DESC, avg_depth_meters DESC"
-    return query, params
-
-def get_water_quality_query(state=None, district=None, min_ph=0, max_ph=14, min_do=0, max_do=15, min_turb=0, max_turb=100, status=None):
-    query = "SELECT * FROM water_monitoring_stations WHERE 1=1"
-    params = []
-    
-    if state and state != "All States":
-        query += " AND state_name = %s"
-        params.append(state)
-    if district and district != "All Districts":
-        query += " AND district_name = %s"
-        params.append(district)
-    if min_ph > 0 or max_ph < 14:
-        query += " AND ph_level >= %s AND ph_level <= %s"
-        params.extend([float(min_ph), float(max_ph)])
-    if min_do > 0 or max_do < 15:
-        query += " AND dissolved_oxygen_mg_l >= %s AND dissolved_oxygen_mg_l <= %s"
-        params.extend([float(min_do), float(max_do)])
-    if min_turb > 0 or max_turb < 100:
-        query += " AND turbidity_ntu >= %s AND turbidity_ntu <= %s"
-        params.extend([float(min_turb), float(max_turb)])
-    if status and status != "All Status":
-        query += " AND status = %s"
-        params.append(status)
-    
-    query += " ORDER BY station_name"
-    return query, params
-
-def get_rainfall_trend_query(district=None, start_year=2020, end_year=2024):
+# CRUD Operations for Water Sources
+def add_water_source(data):
+    """Add a new water source"""
     query = """
-        SELECT 
-            record_year,
-            COUNT(*) as total_records,
-            AVG(rainfall_cm) as avg_rainfall,
-            MIN(rainfall_cm) as min_rainfall,
-            MAX(rainfall_cm) as max_rainfall
-        FROM rainfall_history
-        WHERE record_year >= %s AND record_year <= %s
+    INSERT INTO water_sources 
+    (source_name, source_type, capacity_percent, max_capacity_mcm, current_capacity_mcm, 
+     build_year, state, district, origin_state, is_transboundary, latitude, longitude)
+    VALUES 
+    (:source_name, :source_type, :capacity_percent, :max_capacity_mcm, :current_capacity_mcm,
+     :build_year, :state, :district, :origin_state, :is_transboundary, :latitude, :longitude)
     """
-    params = [int(start_year), int(end_year)]
-    
-    if district and district != "All Districts":
-        query += " AND district_name = %s"
-        params.append(district)
-    
-    query += " GROUP BY record_year ORDER BY record_year"
-    return query, params
+    return execute_query(query, data, commit=True)
 
-def get_groundwater_trend_query(district=None, start_year=2020, end_year=2024):
+def update_water_source(source_id, data):
+    """Update an existing water source"""
     query = """
-        SELECT 
-            assessment_year,
-            COUNT(*) as total_records,
-            AVG(avg_depth_meters) as avg_depth,
-            AVG(extraction_pct) as avg_extraction
-        FROM groundwater_levels
-        WHERE assessment_year >= %s AND assessment_year <= %s
+    UPDATE water_sources 
+    SET source_name = :source_name,
+        source_type = :source_type,
+        capacity_percent = :capacity_percent,
+        max_capacity_mcm = :max_capacity_mcm,
+        current_capacity_mcm = :current_capacity_mcm,
+        build_year = :build_year,
+        state = :state,
+        district = :district,
+        origin_state = :origin_state,
+        is_transboundary = :is_transboundary,
+        latitude = :latitude,
+        longitude = :longitude,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE source_id = :source_id
     """
-    params = [int(start_year), int(end_year)]
-    
-    if district and district != "All Districts":
-        query += " AND district_name = %s"
-        params.append(district)
-    
-    query += " GROUP BY assessment_year ORDER BY assessment_year"
-    return query, params
+    data['source_id'] = source_id
+    return execute_query(query, data, commit=True)
 
-def get_alert_query(sensitivity='Medium'):
-    threshold = {'Low': 50, 'Medium': 60, 'High': 70, 'Critical': 80}
-    thresh = threshold.get(sensitivity, 60)
-    
-    query = f"""
-        SELECT 
-            source_name,
-            source_type,
-            state,
-            capacity_percent,
-            CASE 
-                WHEN capacity_percent < 30 THEN 'CRITICAL_ALERT'
-                WHEN capacity_percent < {thresh} THEN 'WARNING'
-                ELSE 'NORMAL'
-            END as alert_level
-        FROM water_sources
-        WHERE capacity_percent < {thresh}
-        ORDER BY capacity_percent
-        LIMIT 20
+def delete_water_source(source_id):
+    """Delete a water source"""
+    query = "DELETE FROM water_sources WHERE source_id = :source_id"
+    return execute_query(query, {'source_id': source_id}, commit=True)
+
+# CRUD Operations for Monitoring Stations
+def add_monitoring_station(data):
+    """Add a new monitoring station"""
+    query = """
+    INSERT INTO water_monitoring_stations 
+    (station_name, state_name, district_name, latitude, longitude, 
+     ph_level, dissolved_oxygen_mg_l, turbidity_ntu, status)
+    VALUES 
+    (:station_name, :state_name, :district_name, :latitude, :longitude,
+     :ph_level, :dissolved_oxygen_mg_l, :turbidity_ntu, :status)
     """
-    return query, []
+    return execute_query(query, data, commit=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# INITIALIZE SESSION STATE
-# ─────────────────────────────────────────────────────────────────────────────
-if 'sources_data' not in st.session_state:
-    st.session_state.sources_data = None
-if 'rainfall_data' not in st.session_state:
-    st.session_state.rainfall_data = None
-if 'groundwater_data' not in st.session_state:
-    st.session_state.groundwater_data = None
-if 'water_quality_data' not in st.session_state:
-    st.session_state.water_quality_data = None
-if 'rain_trend' not in st.session_state:
-    st.session_state.rain_trend = None
-if 'gw_trend' not in st.session_state:
-    st.session_state.gw_trend = None
-if 'alerts_data' not in st.session_state:
-    st.session_state.alerts_data = None
+def update_monitoring_station(station_id, data):
+    """Update an existing monitoring station"""
+    query = """
+    UPDATE water_monitoring_stations 
+    SET station_name = :station_name,
+        state_name = :state_name,
+        district_name = :district_name,
+        latitude = :latitude,
+        longitude = :longitude,
+        ph_level = :ph_level,
+        dissolved_oxygen_mg_l = :dissolved_oxygen_mg_l,
+        turbidity_ntu = :turbidity_ntu,
+        status = :status,
+        last_updated = CURRENT_TIMESTAMP
+    WHERE station_id = :station_id
+    """
+    data['station_id'] = station_id
+    return execute_query(query, data, commit=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR - ALL 6 FILTER SECTIONS
-# ─────────────────────────────────────────────────────────────────────────────
+def delete_monitoring_station(station_id):
+    """Delete a monitoring station"""
+    query = "DELETE FROM water_monitoring_stations WHERE station_id = :station_id"
+    return execute_query(query, {'station_id': station_id}, commit=True)
+
+# CRUD Operations for Alerts
+def add_alert(data):
+    """Add a new alert"""
+    query = """
+    INSERT INTO active_alerts 
+    (source_name, capacity_percent, ph_level, alert_status, alert_time)
+    VALUES 
+    (:source_name, :capacity_percent, :ph_level, :alert_status, CURRENT_TIMESTAMP)
+    """
+    return execute_query(query, data, commit=True)
+
+def update_alert(alert_id, data):
+    """Update an existing alert"""
+    query = """
+    UPDATE active_alerts 
+    SET source_name = :source_name,
+        capacity_percent = :capacity_percent,
+        ph_level = :ph_level,
+        alert_status = :alert_status
+    WHERE alert_id = :alert_id
+    """
+    data['alert_id'] = alert_id
+    return execute_query(query, data, commit=True)
+
+def delete_alert(alert_id):
+    """Delete an alert"""
+    query = "DELETE FROM active_alerts WHERE alert_id = :alert_id"
+    return execute_query(query, {'alert_id': alert_id}, commit=True)
+
+# CRUD Operations for Groundwater Data
+def add_groundwater_data(data):
+    """Add new groundwater data"""
+    query = """
+    INSERT INTO groundwater_levels 
+    (district_name, avg_depth_meters, extraction_pct, recharge_rate_mcm, assessment_year)
+    VALUES 
+    (:district_name, :avg_depth_meters, :extraction_pct, :recharge_rate_mcm, :assessment_year)
+    """
+    return execute_query(query, data, commit=True)
+
+def update_groundwater_data(gw_id, data):
+    """Update groundwater data"""
+    query = """
+    UPDATE groundwater_levels 
+    SET avg_depth_meters = :avg_depth_meters,
+        extraction_pct = :extraction_pct,
+        recharge_rate_mcm = :recharge_rate_mcm,
+        assessment_year = :assessment_year
+    WHERE id = :gw_id
+    """
+    data['gw_id'] = gw_id
+    return execute_query(query, data, commit=True)
+
+def delete_groundwater_data(gw_id):
+    """Delete groundwater data"""
+    query = "DELETE FROM groundwater_levels WHERE id = :gw_id"
+    return execute_query(query, {'gw_id': gw_id}, commit=True)
+
+# CRUD Operations for Rainfall Data
+def add_rainfall_data(data):
+    """Add new rainfall data"""
+    query = """
+    INSERT INTO rainfall_history 
+    (district_name, rainfall_cm, record_year, season)
+    VALUES 
+    (:district_name, :rainfall_cm, :record_year, :season)
+    """
+    return execute_query(query, data, commit=True)
+
+def update_rainfall_data(rainfall_id, data):
+    """Update rainfall data"""
+    query = """
+    UPDATE rainfall_history 
+    SET rainfall_cm = :rainfall_cm,
+        record_year = :record_year,
+        season = :season
+    WHERE id = :rainfall_id
+    """
+    data['rainfall_id'] = rainfall_id
+    return execute_query(query, data, commit=True)
+
+def delete_rainfall_data(rainfall_id):
+    """Delete rainfall data"""
+    query = "DELETE FROM rainfall_history WHERE id = :rainfall_id"
+    return execute_query(query, {'rainfall_id': rainfall_id}, commit=True)
+
+# ----# -------------------------
+# DATA LOADING FUNCTIONS (FIXED - NEON SYNC VERSION)
+# -------------------------
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_all_data():
+    """Load all data from Neon Cloud database with error handling"""
+    if engine is None:
+        st.warning("⚠️ Database connection not available. Please check your connection settings.")
+        return [pd.DataFrame()] * 8
+    
+    try:
+        with engine.connect() as conn:
+            # Use transaction for reading data
+            with conn.begin():
+                # Get list of tables
+                query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+                tables_df = pd.read_sql(query, conn)
+                tables = tables_df['table_name'].tolist() if not tables_df.empty else []
+                
+                # Helper function to load table with error handling
+                def get_df(table_name):
+                    if table_name in tables:
+                        try:
+                            return pd.read_sql(f'SELECT * FROM "{table_name}"', conn)
+                        except Exception as e:
+                            st.warning(f"Could not load {table_name}: {e}")
+                            return pd.DataFrame()
+                    else:
+                        return pd.DataFrame()
+                
+                # Load existing tables
+                sources = get_df('water_sources')
+                stations = get_df('water_monitoring_stations')
+                groundwater = get_df('groundwater_levels')
+                rainfall = get_df('rainfall_history')
+                alerts = get_df('active_alerts')
+                regional = get_df('regional_stats')
+                
+                # FIX: Since 'water_quality' table doesn't exist, we use 'stations' data
+                # as the source for the Water Quality tab.
+                water_quality = stations.copy() if not stations.empty else pd.DataFrame()
+                
+                # Water Usage with join
+                if 'water_usage_history' in tables and 'water_sources' in tables:
+                    usage_query = """
+                        SELECT wu.*, ws.source_name, ws.source_type, ws.state, ws.district 
+                        FROM water_usage_history wu
+                        LEFT JOIN water_sources ws ON wu.source_id = ws.source_id
+                    """
+                    try:
+                        usage = pd.read_sql(usage_query, conn)
+                    except Exception as e:
+                        st.warning(f"Could not load water usage: {e}")
+                        usage = pd.DataFrame()
+                else:
+                    usage = pd.DataFrame()
+                
+                return sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality
+                
+    except Exception as e:
+        # Critical: Rollback happens automatically here due to the context manager
+        st.error(f"Error loading cloud data: {e}")
+        return [pd.DataFrame()] * 8
+
+# Load the data (call the function once)
+with st.spinner("🚀 Connecting to AQUASTAT Cloud Database..."):
+    sources, stations, groundwater, rainfall, alerts, usage, regional, water_quality = load_all_data()
+
+# --- Sidebar Summary ---
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 📊 Data Summary")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Sources", len(sources))
+        st.metric("Stations", len(stations))
+    with col2:
+        st.metric("Groundwater", len(groundwater))
+        st.metric("Rainfall", len(rainfall))
+
+
+
+# -------------------------
+# DATA PROCESSING
+# -------------------------
+
+current_year = datetime.now().year
+current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
+
+# Process Sources
+if not sources.empty:
+    # Convert numeric columns
+    numeric_cols = ['capacity_percent', 'build_year', 'max_capacity_mcm', 'current_capacity_mcm']
+    for col in numeric_cols:
+        if col in sources.columns:
+            sources[col] = pd.to_numeric(sources[col], errors='coerce')
+    
+    # Calculate age
+    if 'build_year' in sources.columns:
+        sources['age'] = current_year - sources['build_year']
+        sources['age'] = sources['age'].clip(0, 200)
+    else:
+        sources['age'] = 0
+    
+    # Calculate health score
+    if 'capacity_percent' in sources.columns:
+        sources['health_score'] = (
+            sources['capacity_percent'].fillna(50) * 0.5 +  # 50% weight to current capacity
+            (100 - sources['age'].clip(0, 100).fillna(50)) * 0.3 +  # 30% weight to age
+            20  # 20% base score
+        ).clip(0, 100)
+    else:
+        sources['health_score'] = 50
+    
+    # Risk classification
+    if 'capacity_percent' in sources.columns:
+        sources['risk_level'] = pd.cut(
+            sources['capacity_percent'],
+            bins=[0, 30, 60, 100],
+            labels=['Critical', 'Moderate', 'Good'],
+            include_lowest=True
+        )
+    else:
+        sources['risk_level'] = 'Unknown'
+    
+    # Trend calculation
+    np.random.seed(42)
+    sources['trend'] = np.random.choice(['📈 Increasing', '📉 Decreasing', '➡️ Stable'], len(sources))
+
+# Process Groundwater
+if not groundwater.empty:
+    if 'avg_depth_meters' in groundwater.columns:
+        groundwater['stress_level'] = pd.cut(
+            groundwater['avg_depth_meters'],
+            bins=[0, 20, 40, 100],
+            labels=['Low', 'Moderate', 'High']
+        )
+    
+    # Calculate depletion rate if we have multiple years
+    if 'assessment_year' in groundwater.columns and 'avg_depth_meters' in groundwater.columns:
+        groundwater = groundwater.sort_values(['district_name', 'assessment_year'])
+        groundwater['depth_change'] = groundwater.groupby('district_name')['avg_depth_meters'].diff()
+        groundwater['depletion_rate'] = groundwater.groupby('district_name')['depth_change'].transform('mean')
+
+# Process Rainfall
+if not rainfall.empty:
+    if 'rainfall_cm' in rainfall.columns:
+        rainfall['rainfall_category'] = pd.cut(
+            rainfall['rainfall_cm'],
+            bins=[0, 50, 150, 300, float('inf')],
+            labels=['Low', 'Moderate', 'High', 'Extreme']
+        )
+    
+    # Calculate deviation from normal
+    if 'rainfall_cm' in rainfall.columns and 'record_year' in rainfall.columns:
+        avg_by_region = rainfall.groupby('district_name')['rainfall_cm'].transform('mean')
+        rainfall['deviation_pct'] = ((rainfall['rainfall_cm'] - avg_by_region) / avg_by_region * 100).round(1)
+
+# Add coordinates to sources from stations
+def add_coordinates_to_sources(sources_df, stations_df):
+    """Add coordinates from monitoring stations to water sources"""
+    if sources_df.empty or stations_df.empty:
+        return sources_df
+    
+    df = sources_df.copy()
+    
+    if 'district' in df.columns and 'district_name' in stations_df.columns:
+        if 'latitude' in stations_df.columns and 'longitude' in stations_df.columns:
+            stations_df['district_clean'] = stations_df['district_name'].str.strip().str.lower()
+            district_coords = stations_df.groupby('district_clean').agg({
+                'latitude': 'first',
+                'longitude': 'first'
+            }).reset_index()
+            
+            df['district_clean'] = df['district'].str.strip().str.lower()
+            df = df.merge(district_coords, on='district_clean', how='left')
+            df = df.drop('district_clean', axis=1)
+    
+    return df
+
+# Apply coordinate mapping
+if not sources.empty and not stations.empty:
+    sources = add_coordinates_to_sources(sources, stations)
+
+# -------------------------
+# SIDEBAR FILTERS & AUTH
+# -------------------------
+
+# Check authentication
+is_authenticated = check_password()
+is_admin = st.session_state.get("is_admin", False)
+
 with st.sidebar:
     st.title("🎮 AQUASTAT")
-    st.caption("Complete Water Management System")
+    st.caption("Command Interface v3.0")
+    
+    # Connection status
+    if engine is not None:
+        st.success("✅ Cloud Connected")
+    else:
+        st.error("❌ Cloud Disconnected")
+    
+    # User role badge
+    if is_authenticated and is_admin:
+        st.markdown(f'<span class="admin-badge">👑 ADMIN ACCESS</span>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<span class="user-badge">👤 VIEWER ACCESS</span>', unsafe_allow_html=True)
+    
     st.markdown("---")
     
+    # Reset button
     if st.button("🔄 Reset All Filters", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
     
     st.markdown("---")
     
-    # SECTION 1: WATER SOURCE FILTERS
-    with st.expander("🏭 WATER SOURCE FILTERS", expanded=True):
-        state_filter = st.selectbox("State", ["All States", "State A", "State B", "State C", "State D"])
-        district_filter = st.selectbox("District", ["All Districts", "North", "South", "East", "West", "Central"])
-        source_type_filter = st.selectbox("Source Type", ["All Types", "River", "Reservoir", "Lake", "Well", "Canal"])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_capacity = st.number_input("Min Capacity %", 0, 100, 0)
-        with col2:
-            max_capacity = st.number_input("Max Capacity %", 0, 100, 100)
-        
-        risk_filter = st.selectbox("Risk Level", ["All Risk Levels", "Critical", "Moderate", "Good"])
+    # ========== TIME FILTERS ==========
+    st.markdown("### 📅 Time Filters")
     
-    # SECTION 2: RAINFALL FILTERS
-    with st.expander("🌧️ RAINFALL FILTERS", expanded=True):
-        rain_district = st.selectbox("Rainfall District", ["All Districts", "North", "South", "East", "West", "Central"])
-        rain_year = st.selectbox("Year", ["All Years", 2020, 2021, 2022, 2023, 2024])
-        rain_season = st.selectbox("Season", ["All Seasons", "Winter", "Summer", "Monsoon", "Post-Monsoon"])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_rainfall = st.number_input("Min Rainfall (cm)", 0, 500, 0)
-        with col2:
-            max_rainfall = st.number_input("Max Rainfall (cm)", 0, 500, 500)
-        
-        rain_category = st.selectbox("Rainfall Category", ["All Categories", "Low", "Moderate", "High", "Extreme"])
-    
-    # SECTION 3: GROUNDWATER FILTERS
-    with st.expander("🌊 GROUNDWATER FILTERS", expanded=True):
-        gw_district = st.selectbox("GW District", ["All Districts", "North", "South", "East", "West", "Central"])
-        gw_year = st.selectbox("Assessment Year", ["All Years", 2020, 2021, 2022, 2023, 2024])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_depth = st.number_input("Min Depth (m)", 0, 100, 0)
-        with col2:
-            max_depth = st.number_input("Max Depth (m)", 0, 100, 100)
-        
-        stress_level = st.selectbox("Stress Level", ["All Levels", "Low", "Moderate", "High", "Critical"])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_extraction = st.number_input("Min Extraction %", 0, 100, 0)
-        with col2:
-            max_extraction = st.number_input("Max Extraction %", 0, 100, 100)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_recharge = st.number_input("Min Recharge (MCM)", 0, 1000, 0)
-        with col2:
-            max_recharge = st.number_input("Max Recharge (MCM)", 0, 1000, 1000)
-    
-    # SECTION 4: WATER QUALITY FILTERS
-    with st.expander("💧 WATER QUALITY FILTERS", expanded=True):
-        wq_state = st.selectbox("WQ State", ["All States", "State A", "State B", "State C", "State D"])
-        wq_district = st.selectbox("WQ District", ["All Districts", "North", "South", "East", "West", "Central"])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_ph = st.slider("Min pH", 0.0, 14.0, 0.0, 0.1)
-        with col2:
-            max_ph = st.slider("Max pH", 0.0, 14.0, 14.0, 0.1)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_do = st.slider("Min DO (mg/L)", 0.0, 15.0, 0.0, 0.1)
-        with col2:
-            max_do = st.slider("Max DO (mg/L)", 0.0, 15.0, 15.0, 0.1)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            min_turbidity = st.number_input("Min Turbidity (NTU)", 0, 100, 0)
-        with col2:
-            max_turbidity = st.number_input("Max Turbidity (NTU)", 0, 100, 100)
-        
-        station_status = st.selectbox("Station Status", ["All Status", "Active", "Maintenance", "Inactive"])
-    
-    # SECTION 5: ADVANCED ANALYTICS FILTERS
-    with st.expander("📊 ADVANCED ANALYTICS FILTERS", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            start_year = st.selectbox("Start Year", [2020, 2021, 2022, 2023, 2024], index=0)
-        with col2:
-            end_year = st.selectbox("End Year", [2020, 2021, 2022, 2023, 2024], index=4)
-        
-        alert_sensitivity = st.select_slider("Alert Sensitivity", options=["Low", "Medium", "High", "Critical"], value="Medium")
-    
-    # SECTION 6: MAP SETTINGS
-    with st.expander("🗺️ MAP SETTINGS", expanded=True):
-        show_heatmap = st.checkbox("Show Heatmap", False)
-        show_clusters = st.checkbox("Show Marker Clusters", True)
-        marker_size = st.slider("Marker Size", 5, 20, 10)
-        map_zoom = st.slider("Map Zoom Level", 4, 12, 6)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AUTO-EXECUTE SQL QUERIES
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Execute Water Sources Query
-sources_query, sources_params = get_water_sources_query(
-    state_filter, district_filter, source_type_filter, min_capacity, max_capacity, risk_filter
-)
-st.session_state.sources_data = execute_query(sources_query, sources_params)
-
-# Execute Rainfall Query
-rainfall_query, rainfall_params = get_rainfall_query(
-    rain_district, rain_year if rain_year != "All Years" else None, 
-    rain_season if rain_season != "All Seasons" else None,
-    min_rainfall, max_rainfall, rain_category if rain_category != "All Categories" else None
-)
-st.session_state.rainfall_data = execute_query(rainfall_query, rainfall_params)
-
-# Execute Groundwater Query
-groundwater_query, gw_params = get_groundwater_query(
-    gw_district, gw_year if gw_year != "All Years" else None,
-    min_depth, max_depth, stress_level if stress_level != "All Levels" else None,
-    min_extraction, max_extraction, min_recharge, max_recharge
-)
-st.session_state.groundwater_data = execute_query(groundwater_query, gw_params)
-
-# Execute Water Quality Query
-wq_query, wq_params = get_water_quality_query(
-    wq_state, wq_district, min_ph, max_ph, min_do, max_do, min_turbidity, max_turbidity,
-    station_status if station_status != "All Status" else None
-)
-st.session_state.water_quality_data = execute_query(wq_query, wq_params)
-
-# Execute Trend Queries
-rain_trend_query, rain_trend_params = get_rainfall_trend_query(rain_district, start_year, end_year)
-st.session_state.rain_trend = execute_query(rain_trend_query, rain_trend_params)
-
-gw_trend_query, gw_trend_params = get_groundwater_trend_query(gw_district, start_year, end_year)
-st.session_state.gw_trend = execute_query(gw_trend_query, gw_trend_params)
-
-# Execute Alert Query
-alert_query, alert_params = get_alert_query(alert_sensitivity)
-st.session_state.alerts_data = execute_query(alert_query, alert_params)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN CONTENT - HEADER & KPIs
-# ─────────────────────────────────────────────────────────────────────────────
-current_time = datetime.now(pytz.timezone("Asia/Kolkata"))
-
-st.markdown("<h1 style='color:#00e5ff'>💧 AQUASTAT</h1>", unsafe_allow_html=True)
-st.markdown(f"<p>National Water Command Center • Live Intelligence • {current_time.strftime('%Y-%m-%d %H:%M:%S IST')}</p>", unsafe_allow_html=True)
-
-# KPIs
-sources_df = st.session_state.sources_data
-rainfall_df = st.session_state.rainfall_data
-gw_df = st.session_state.groundwater_data
-
-total_sources = len(sources_df) if sources_df is not None else 0
-avg_capacity = sources_df['capacity_percent'].mean() if sources_df is not None and not sources_df.empty else 0
-critical_sources = len(sources_df[sources_df['capacity_percent'] < 30]) if sources_df is not None and not sources_df.empty else 0
-total_rainfall = rainfall_df['rainfall_cm'].sum() if rainfall_df is not None and not rainfall_df.empty else 0
-avg_gw_depth = gw_df['avg_depth_meters'].mean() if gw_df is not None and not gw_df.empty else 0
-
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.markdown(f"<div class='kpi-card'><div class='kpi-value'>{total_sources}</div><div>Total Sources</div></div>", unsafe_allow_html=True)
-col2.markdown(f"<div class='kpi-card'><div class='kpi-value'>{avg_capacity:.1f}%</div><div>Avg Capacity</div></div>", unsafe_allow_html=True)
-col3.markdown(f"<div class='kpi-card'><div class='kpi-value'>{critical_sources}</div><div>Critical Sources</div></div>", unsafe_allow_html=True)
-col4.markdown(f"<div class='kpi-card'><div class='kpi-value'>{total_rainfall:.0f} cm</div><div>Total Rainfall</div></div>", unsafe_allow_html=True)
-col5.markdown(f"<div class='kpi-card'><div class='kpi-value'>{avg_gw_depth:.1f} m</div><div>Avg GW Depth</div></div>", unsafe_allow_html=True)
-
-st.markdown("---")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN TABS
-# ─────────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "🗺️ Map View", "📈 Analytics", "💧 Water Quality", "⚠️ Alerts"])
-
-# TAB 1: DASHBOARD
-with tab1:
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🏭 Water Sources by Type")
-        if sources_df is not None and not sources_df.empty and 'source_type' in sources_df.columns:
-            type_counts = sources_df['source_type'].value_counts()
-            if not type_counts.empty:
-                fig = px.pie(values=type_counts.values, names=type_counts.index, title="Source Distribution")
-                st.plotly_chart(fig, use_container_width=True)
-        
-        st.subheader("📈 Capacity Distribution")
-        if sources_df is not None and not sources_df.empty and 'capacity_percent' in sources_df.columns:
-            fig = px.histogram(sources_df, x='capacity_percent', nbins=20, title="Capacity Distribution")
-            fig.add_vline(x=30, line_dash="dash", line_color="red")
-            fig.add_vline(x=60, line_dash="dash", line_color="orange")
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.subheader("⚠️ Risk Assessment")
-        if sources_df is not None and not sources_df.empty and 'risk_level' in sources_df.columns:
-            risk_counts = sources_df['risk_level'].value_counts()
-            if not risk_counts.empty:
-                fig = px.bar(x=risk_counts.index, y=risk_counts.values, title="Risk Distribution", color=risk_counts.index)
-                st.plotly_chart(fig, use_container_width=True)
-        
-        st.subheader("🏆 Top Sources by Capacity")
-        if sources_df is not None and not sources_df.empty and 'capacity_percent' in sources_df.columns:
-            top_sources = sources_df.nlargest(5, 'capacity_percent')[['source_name', 'capacity_percent']]
-            if not top_sources.empty:
-                fig = px.bar(top_sources, x='capacity_percent', y='source_name', orientation='h', title="Top 5 Sources")
-                st.plotly_chart(fig, use_container_width=True)
-    
-    st.subheader("📋 Filtered Water Sources Data")
-    if sources_df is not None and not sources_df.empty:
-        st.dataframe(sources_df, use_container_width=True)
-
-# TAB 2: MAP VIEW
-with tab2:
-    st.subheader("🗺️ Interactive Water Resources Map")
-    
-    if sources_df is not None and not sources_df.empty and 'latitude' in sources_df.columns and 'longitude' in sources_df.columns:
-        map_data = sources_df[sources_df['latitude'].notna() & sources_df['longitude'].notna()]
-        
-        if not map_data.empty:
-            center_lat = map_data['latitude'].mean()
-            center_lon = map_data['longitude'].mean()
-            m = folium.Map(location=[center_lat, center_lon], zoom_start=map_zoom, tiles="CartoDB dark_matter")
-            
-            if show_heatmap:
-                heat_data = [[row['latitude'], row['longitude'], row.get('capacity_percent', 50)] for _, row in map_data.iterrows()]
-                HeatMap(heat_data).add_to(m)
-            
-            if show_clusters:
-                marker_cluster = MarkerCluster().add_to(m)
-                for _, row in map_data.iterrows():
-                    capacity = row.get('capacity_percent', 100)
-                    color = 'red' if capacity < 30 else 'orange' if capacity < 60 else 'green'
-                    popup = f"<b>{row.get('source_name', 'Unknown')}</b><br>Capacity: {capacity:.1f}%"
-                    folium.CircleMarker([row['latitude'], row['longitude']], radius=marker_size, color=color, fill=True, popup=popup).add_to(marker_cluster)
-            else:
-                for _, row in map_data.iterrows():
-                    capacity = row.get('capacity_percent', 100)
-                    color = 'red' if capacity < 30 else 'orange' if capacity < 60 else 'green'
-                    folium.CircleMarker([row['latitude'], row['longitude']], radius=marker_size, color=color, fill=True).add_to(m)
-            
-            st_folium(m, width=1200, height=600)
+    # Year filter
+    if not sources.empty and 'build_year' in sources.columns:
+        available_years = sorted(sources['build_year'].dropna().unique())
+        if len(available_years) > 0:
+            min_year = int(min(available_years))
+            max_year = int(max(available_years))
+            year_range = st.slider(
+                "Build Year Range",
+                min_value=1800,
+                max_value=2026,
+                value=(min_year, max_year)
+            )
         else:
-            st.warning("No map data available")
+            year_range = (1800, 2026)
     else:
-        st.warning("Latitude/Longitude data not available")
-
-# TAB 3: ANALYTICS
-with tab3:
-    st.subheader("📈 Analytics Dashboard")
+        year_range = (1800, 2026)
     
-    col1, col2 = st.columns(2)
+    st.markdown("---")
     
-    with col1:
-        st.subheader("🌧️ Rainfall Trend")
-        if st.session_state.rain_trend is not None and not st.session_state.rain_trend.empty:
-            fig = px.line(st.session_state.rain_trend, x='record_year', y='avg_rainfall', title="Average Rainfall Over Years", markers=True)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        st.subheader("🌊 Groundwater Trend")
-        if st.session_state.gw_trend is not None and not st.session_state.gw_trend.empty:
-            fig = px.line(st.session_state.gw_trend, x='assessment_year', y='avg_depth', title="Groundwater Depth Trend", markers=True)
-            st.plotly_chart(fig, use_container_width=True)
+    # ========== GEOGRAPHIC FILTERS ==========
+    st.markdown("### 🌍 Geographic Filters")
     
-    with col2:
-        st.subheader("💧 Seasonal Rainfall Pattern")
-        if rainfall_df is not None and not rainfall_df.empty and 'season' in rainfall_df.columns:
-            seasonal = rainfall_df.groupby('season')['rainfall_cm'].mean().reset_index()
-            if not seasonal.empty:
-                fig = px.bar(seasonal, x='season', y='rainfall_cm', title="Average Rainfall by Season")
-                st.plotly_chart(fig, use_container_width=True)
-        
-        st.subheader("🔄 Extraction vs Recharge")
-        if gw_df is not None and not gw_df.empty and 'district_name' in gw_df.columns:
-            top_gw = gw_df.head(10)
-            if not top_gw.empty:
-                fig = go.Figure()
-                fig.add_trace(go.Bar(name='Extraction %', x=top_gw['district_name'], y=top_gw['extraction_pct'], marker_color='#ff4444'))
-                fig.add_trace(go.Bar(name='Recharge Rate', x=top_gw['district_name'], y=top_gw['recharge_rate_mcm']/5, marker_color='#00ff9d'))
-                fig.update_layout(title="Extraction vs Recharge by District", barmode='group')
-                st.plotly_chart(fig, use_container_width=True)
-
-# TAB 4: WATER QUALITY
-with tab4:
-    st.subheader("💧 Water Quality Monitoring")
-    
-    wq_df = st.session_state.water_quality_data
-    
-    if wq_df is not None and not wq_df.empty:
-        col1, col2, col3 = st.columns(3)
-        avg_ph = wq_df['ph_level'].mean() if 'ph_level' in wq_df.columns else 0
-        avg_do = wq_df['dissolved_oxygen_mg_l'].mean() if 'dissolved_oxygen_mg_l' in wq_df.columns else 0
-        active = len(wq_df[wq_df['status'] == 'Active']) if 'status' in wq_df.columns else 0
-        
-        col1.metric("Avg pH", f"{avg_ph:.2f}")
-        col2.metric("Avg Dissolved Oxygen", f"{avg_do:.1f} mg/L")
-        col3.metric("Active Stations", active)
-        
-        st.subheader("🧪 pH Level Distribution")
-        if 'ph_level' in wq_df.columns:
-            fig = px.histogram(wq_df, x='ph_level', nbins=15, title="pH Distribution")
-            fig.add_vline(x=6.5, line_dash="dash", line_color="green")
-            fig.add_vline(x=8.5, line_dash="dash", line_color="green")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        st.subheader("📋 Water Quality Data")
-        st.dataframe(wq_df, use_container_width=True)
+    # State filter
+    if not sources.empty and 'state' in sources.columns:
+        states = ['All States'] + sorted(sources['state'].dropna().unique().tolist())
+        selected_state = st.selectbox("State", states, index=0)
     else:
-        st.info("No water quality data available")
-
-# TAB 5: ALERTS
-with tab5:
-    st.subheader("⚠️ Active Alerts")
+        selected_state = "All States"
     
-    alerts_df = st.session_state.alerts_data
-    
-    if alerts_df is not None and not alerts_df.empty:
-        critical = len(alerts_df[alerts_df['alert_level'] == 'CRITICAL_ALERT']) if 'alert_level' in alerts_df.columns else 0
-        warning = len(alerts_df[alerts_df['alert_level'] == 'WARNING']) if 'alert_level' in alerts_df.columns else 0
+    # District filter
+    if not sources.empty and 'district' in sources.columns:
+        if selected_state != "All States":
+            districts = sources[sources['state'] == selected_state]['district'].dropna().unique()
+        else:
+            districts = sources['district'].dropna().unique()
         
-        col1, col2 = st.columns(2)
-        col1.markdown(f"<div class='badge-critical'>🔴 CRITICAL: {critical}</div>", unsafe_allow_html=True)
-        col2.markdown(f"<div class='badge-warning'>🟡 WARNING: {warning}</div>", unsafe_allow_html=True)
-        
-        st.subheader("📋 Alert Details")
-        st.dataframe(alerts_df, use_container_width=True)
+        if len(districts) > 0:
+            districts = ['All Districts'] + sorted(districts.tolist())
+        else:
+            districts = ['All Districts']
+        selected_district = st.selectbox("District", districts, index=0)
     else:
-        st.success("✅ No active alerts at this time")
+        selected_district = "All Districts"
+    
+    st.markdown("---")
+    
+    # ========== SOURCE FILTERS ==========
+    st.markdown("### 💧 Source Filters")
+    
+    # Source type
+    if not sources.empty and 'source_type' in sources.columns:
+        source_types = ['All Types'] + sorted(sources['source_type'].dropna().unique().tolist())
+        selected_type = st.selectbox("Source Type", source_types, index=0)
+    else:
+        selected_type = "All Types"
+    
+    # Capacity range
+    if not sources.empty and 'capacity_percent' in sources.columns:
+        min_cap = float(sources['capacity_percent'].min())
+        max_cap = float(sources['capacity_percent'].max())
+        capacity_range = st.slider(
+            "Capacity %",
+            min_value=min_cap,
+            max_value=max_cap,
+            value=(min_cap, max_cap)
+        )
+    else:
+        capacity_range = (0, 100)
+    
+    # Risk level
+    if not sources.empty and 'risk_level' in sources.columns:
+        risk_options = ['All Risk Levels'] + list(sources['risk_level'].unique())
+        selected_risk = st.selectbox("Risk Level", risk_options, index=0)
+    else:
+        selected_risk = "All Risk Levels"
+    
+    st.markdown("---")
+    
+    # ========== MAP SETTINGS ==========
+    st.markdown("### 🗺️ Map Settings")
+    
+    map_style = st.selectbox(
+        "Map Style",
+        ["Esri Satellite", "OpenStreetMap", "CartoDB Dark", "CartoDB Light"],
+        index=0
+    )
+    
+    show_heatmap = st.checkbox("Show Heatmap", True)
+    show_clusters = st.checkbox("Show Clusters", True)
+    show_stations = st.checkbox("Show Monitoring Stations", True)
+    marker_size = st.slider("Marker Size", 5, 20, 12)
+    
+    st.markdown("---")
+    st.caption(f"📊 Total Sources: {len(sources):,}")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FOOTER
-# ─────────────────────────────────────────────────────────────────────────────
+# ========== APPLY FILTERS ==========
+
+def apply_filters():
+    """Apply all filters to data"""
+    filtered_sources = sources.copy()
+    
+    # Apply state filter
+    if selected_state != "All States" and 'state' in filtered_sources.columns:
+        filtered_sources = filtered_sources[filtered_sources['state'] == selected_state]
+    
+    # Apply district filter
+    if selected_district != "All Districts" and 'district' in filtered_sources.columns:
+        filtered_sources = filtered_sources[filtered_sources['district'] == selected_district]
+    
+    # Apply source type filter
+    if selected_type != "All Types" and 'source_type' in filtered_sources.columns:
+        filtered_sources = filtered_sources[filtered_sources['source_type'] == selected_type]
+    
+    # Apply year filter
+    if 'build_year' in filtered_sources.columns:
+        filtered_sources = filtered_sources[
+            (filtered_sources['build_year'] >= year_range[0]) &
+            (filtered_sources['build_year'] <= year_range[1])
+        ]
+    
+    # Apply capacity filter
+    if 'capacity_percent' in filtered_sources.columns:
+        filtered_sources = filtered_sources[
+            (filtered_sources['capacity_percent'] >= capacity_range[0]) &
+            (filtered_sources['capacity_percent'] <= capacity_range[1])
+        ]
+    
+    # Apply risk filter
+    if selected_risk != "All Risk Levels" and 'risk_level' in filtered_sources.columns:
+        filtered_sources = filtered_sources[filtered_sources['risk_level'] == selected_risk]
+    
+    return filtered_sources
+
+filtered_sources = apply_filters()
+
+def filter_stations():
+    """Filter stations based on selected state and district"""
+    filtered_stations = stations.copy()
+    
+    if selected_state != "All States" and 'state_name' in filtered_stations.columns:
+        filtered_stations = filtered_stations[filtered_stations['state_name'] == selected_state]
+    
+    if selected_district != "All Districts" and 'district_name' in filtered_stations.columns:
+        filtered_stations = filtered_stations[filtered_stations['district_name'] == selected_district]
+    
+    return filtered_stations
+
+filtered_stations = filter_stations()
+
+# -------------------------
+# MAIN DASHBOARD
+# -------------------------
+
+# Header
+st.title("💧 AQUASTAT National Water Command Center")
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.caption(f"**Live Intelligence** • Last Updated: {current_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
+with col2:
+    if is_admin:
+        st.markdown(f"<div style='text-align: right;'><span class='admin-badge'>👑 ADMIN MODE</span></div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div style='text-align: right;'><span class='user-badge'>👤 VIEWER MODE</span></div>", unsafe_allow_html=True)
+
+# KPI Row with custom styling
+col1, col2, col3, col4, col5 = st.columns(5)
+
+with col1:
+    st.markdown("""
+    <div class="metric-card">
+        <h3 style="color: #8892b0; margin:0;">Total Sources</h3>
+        <h1 style="color: #00e5ff; margin:0;">{}</h1>
+        <p style="color: #64ffda;">{} filtered</p>
+    </div>
+    """.format(
+        f"{len(sources):,}",
+        f"{len(sources) - len(filtered_sources)}"
+    ), unsafe_allow_html=True)
+
+with col2:
+    avg_cap = filtered_sources['capacity_percent'].mean() if not filtered_sources.empty and 'capacity_percent' in filtered_sources.columns else 0
+    st.markdown("""
+    <div class="metric-card">
+        <h3 style="color: #8892b0; margin:0;">Avg Capacity</h3>
+        <h1 style="color: #00e5ff; margin:0;">{:.1f}%</h1>
+    </div>
+    """.format(avg_cap), unsafe_allow_html=True)
+
+with col3:
+    if not filtered_sources.empty and 'capacity_percent' in filtered_sources.columns:
+        critical = len(filtered_sources[filtered_sources['capacity_percent'] < 30])
+    else:
+        critical = 0
+    st.markdown("""
+    <div class="metric-card">
+        <h3 style="color: #8892b0; margin:0;">Critical Sources</h3>
+        <h1 style="color: #ff4444; margin:0;">{}</h1>
+    </div>
+    """.format(critical), unsafe_allow_html=True)
+
+with col4:
+    if not filtered_sources.empty and 'latitude' in filtered_sources.columns:
+        sources_with_coords = len(filtered_sources[filtered_sources['latitude'].notna()])
+    else:
+        sources_with_coords = 0
+    st.markdown("""
+    <div class="metric-card">
+        <h3 style="color: #8892b0; margin:0;">On Map</h3>
+        <h1 style="color: #00e5ff; margin:0;">{}</h1>
+    </div>
+    """.format(sources_with_coords), unsafe_allow_html=True)
+
+with col5:
+    st.markdown("""
+    <div class="metric-card">
+        <h3 style="color: #8892b0; margin:0;">Active Alerts</h3>
+        <h1 style="color: #ffd700; margin:0;">{}</h1>
+    </div>
+    """.format(len(alerts)), unsafe_allow_html=True)
+
 st.markdown("---")
-st.markdown(f"<p style='text-align:center'>AQUASTAT v5.0 • Automatic SQL Filtering • {current_time.strftime('%Y-%m-%d %H:%M IST')}</p>", unsafe_allow_html=True)
+
+# Main Tabs - Show Admin tab only for authenticated admins
+if is_admin:
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📊 DASHBOARD",
+        "🗺️ MAP VIEW",
+        "📈 ANALYTICS",
+        "💧 WATER QUALITY",
+        "⚠️ ALERTS",
+        "📋 DATA TABLES",
+        "👑 ADMIN PANEL"
+    ])
+else:
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 DASHBOARD",
+        "🗺️ MAP VIEW",
+        "📈 ANALYTICS",
+        "💧 WATER QUALITY",
+        "⚠️ ALERTS",
+        "📋 DATA TABLES"
+    ])
+
+# =====================
+# TAB 1: DASHBOARD (Same as before)
+# =====================
+
+with tab1:
+    if filtered_sources.empty:
+        st.warning("⚠️ No water sources match the current filters. Try clearing some filters.")
+        
+        with st.expander("📋 Show all sources sample"):
+            available_cols = ['source_name', 'source_type', 'state', 'district', 'capacity_percent']
+            available_cols = [col for col in available_cols if col in sources.columns]
+            if len(available_cols) > 0:
+                st.dataframe(sources[available_cols].head(20), use_container_width=True)
+    
+    else:
+        # First row - Capacity and Type Distribution
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<p class="section-header">📊 Capacity Distribution</p>', unsafe_allow_html=True)
+            if 'capacity_percent' in filtered_sources.columns:
+                fig = px.histogram(
+                    filtered_sources,
+                    x='capacity_percent',
+                    nbins=20,
+                    title=f"Storage Capacity Distribution ({len(filtered_sources)} sources)",
+                    template="plotly_dark",
+                    color_discrete_sequence=['#00e5ff']
+                )
+                fig.update_layout(
+                    xaxis_title="Capacity (%)",
+                    yaxis_title="Number of Sources",
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown('<p class="section-header">🏭 Source Types</p>', unsafe_allow_html=True)
+            if 'source_type' in filtered_sources.columns:
+                type_counts = filtered_sources['source_type'].value_counts().reset_index()
+                type_counts.columns = ['Source Type', 'Count']
+                fig = px.pie(
+                    type_counts,
+                    values='Count',
+                    names='Source Type',
+                    title="Water Sources by Type",
+                    template="plotly_dark",
+                    color_discrete_sequence=px.colors.sequential.Tealgrn
+                )
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Second row - Groundwater and Rainfall
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<p class="section-header">📈 Groundwater Stress</p>', unsafe_allow_html=True)
+            if not groundwater.empty and 'stress_level' in groundwater.columns:
+                filtered_gw = groundwater.copy()
+                if selected_district != "All Districts" and 'district_name' in filtered_gw.columns:
+                    filtered_gw = filtered_gw[filtered_gw['district_name'] == selected_district]
+                
+                if not filtered_gw.empty:
+                    stress_counts = filtered_gw['stress_level'].value_counts().reset_index()
+                    stress_counts.columns = ['Stress Level', 'Count']
+                    fig = px.bar(
+                        stress_counts,
+                        x='Stress Level',
+                        y='Count',
+                        title="Groundwater Stress Distribution",
+                        template="plotly_dark",
+                        color='Stress Level',
+                        color_discrete_map={
+                            'Low': '#00ff9d',
+                            'Moderate': '#ffd700',
+                            'High': '#ff4444'
+                        },
+                        text_auto=True
+                    )
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown('<p class="section-header">☔ Rainfall Analysis</p>', unsafe_allow_html=True)
+            if not rainfall.empty and 'season' in rainfall.columns and 'rainfall_cm' in rainfall.columns:
+                filtered_rain = rainfall.copy()
+                if selected_district != "All Districts" and 'district_name' in filtered_rain.columns:
+                    filtered_rain = filtered_rain[filtered_rain['district_name'] == selected_district]
+                
+                if not filtered_rain.empty:
+                    season_rain = filtered_rain.groupby('season')['rainfall_cm'].mean().reset_index()
+                    fig = px.bar(
+                        season_rain,
+                        x='season',
+                        y='rainfall_cm',
+                        title="Average Rainfall by Season",
+                        template="plotly_dark",
+                        color='rainfall_cm',
+                        color_continuous_scale='Blues',
+                        text_auto='.1f'
+                    )
+                    fig.update_traces(textposition='outside')
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        # Third row - Risk Distribution
+        if 'risk_level' in filtered_sources.columns:
+            st.markdown('<p class="section-header">⚠️ Risk Assessment</p>', unsafe_allow_html=True)
+            risk_counts = filtered_sources['risk_level'].value_counts().reset_index()
+            risk_counts.columns = ['Risk Level', 'Count']
+            
+            fig = px.bar(
+                risk_counts,
+                x='Risk Level',
+                y='Count',
+                color='Risk Level',
+                color_discrete_map={
+                    'Good': '#00ff9d',
+                    'Moderate': '#ffd700',
+                    'Critical': '#ff4444'
+                },
+                title="Infrastructure Risk Assessment",
+                template="plotly_dark",
+                text_auto=True
+            )
+            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
+
+# =====================
+# TAB 2: MAP VIEW (Same as before)
+# =====================
+
+with tab2:
+    st.markdown('<p class="section-header">🗺️ National Interactive Water Resources Map</p>', unsafe_allow_html=True)
+    
+    # Filter info
+    filter_info = []
+    if selected_state != "All States":
+        filter_info.append(f"State: {selected_state}")
+    if selected_district != "All Districts":
+        filter_info.append(f"District: {selected_district}")
+    if selected_type != "All Types":
+        filter_info.append(f"Type: {selected_type}")
+    
+    if filter_info:
+        st.info(f"**Showing:** {', '.join(filter_info)} | **Total Sources:** {len(filtered_sources)}")
+    
+    # Map style mapping
+    style_map = {
+        "Esri Satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "OpenStreetMap": "OpenStreetMap",
+        "CartoDB Dark": "CartoDB dark_matter",
+        "CartoDB Light": "CartoDB positron"
+    }
+    
+    # Center map
+    center_lat, center_lon, zoom = 20.5937, 78.9629, 5
+    
+    if not filtered_sources.empty and 'latitude' in filtered_sources.columns and 'longitude' in filtered_sources.columns:
+        sources_with_coords = filtered_sources[filtered_sources['latitude'].notna() & filtered_sources['longitude'].notna()]
+        
+        if not sources_with_coords.empty:
+            if selected_district != "All Districts":
+                center_lat = sources_with_coords['latitude'].mean()
+                center_lon = sources_with_coords['longitude'].mean()
+                zoom = 9
+            elif selected_state != "All States":
+                center_lat = sources_with_coords['latitude'].mean()
+                center_lon = sources_with_coords['longitude'].mean()
+                zoom = 7
+    
+    # Create map
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=zoom,
+        tiles=style_map[map_style],
+        attr='AQUASTAT'
+    )
+    
+    Fullscreen().add_to(m)
+    
+    # Add layers
+    if show_clusters and len(filtered_sources) > 10:
+        marker_cluster = MarkerCluster().add_to(m)
+    else:
+        marker_cluster = m
+    
+    heat_data = []
+    sources_on_map = 0
+    
+    # Add water sources
+    if not filtered_sources.empty and 'latitude' in filtered_sources.columns and 'longitude' in filtered_sources.columns:
+        sources_with_coords = filtered_sources[
+            filtered_sources['latitude'].notna() & 
+            filtered_sources['longitude'].notna()
+        ]
+        
+        for _, source in sources_with_coords.iterrows():
+            capacity = source.get('capacity_percent', 50)
+            if capacity < 30:
+                color = '#ff4444'
+                risk_text = "CRITICAL"
+            elif capacity < 60:
+                color = '#ffd700'
+                risk_text = "MODERATE"
+            else:
+                color = '#00ff9d'
+                risk_text = "GOOD"
+            
+            heat_data.append([source['latitude'], source['longitude']])
+            sources_on_map += 1
+            
+            # Popup HTML
+            popup_html = f"""
+            <div style="font-family: Arial; min-width: 250px; background: #0a192f; color: #e6f1ff;">
+                <h4 style="color: {color}; margin:0;">{source.get('source_name', 'Unknown')}</h4>
+                <hr style="margin:5px 0; border-color: #1e3a5f;">
+                <table style="width:100%;">
+                    <tr><td><b>Type:</b></td><td>{source.get('source_type', 'Unknown')}</td></tr>
+                    <tr><td><b>Location:</b></td><td>{source.get('district', 'Unknown')}, {source.get('state', 'Unknown')}</td></tr>
+                    <tr><td><b>Capacity:</b></td><td>{capacity:.1f}%</td></tr>
+                    <tr><td><b>Age:</b></td><td>{source.get('age', 0):.0f} years</td></tr>
+                    <tr><td><b>Risk:</b></td><td><span style="color:{color};">{risk_text}</span></td></tr>
+                    <tr><td><b>Trend:</b></td><td>{source.get('trend', 'N/A')}</td></tr>
+                </table>
+            </div>
+            """
+            
+            marker = folium.CircleMarker(
+                location=[source['latitude'], source['longitude']],
+                radius=marker_size + (3 if capacity < 30 else 0),
+                color=color,
+                fill=True,
+                fillOpacity=0.7,
+                popup=folium.Popup(popup_html, max_width=300),
+                tooltip=f"{source.get('source_name', 'Unknown')} - {capacity:.0f}%"
+            )
+            
+            if show_clusters and len(filtered_sources) > 10:
+                marker.add_to(marker_cluster)
+            else:
+                marker.add_to(m)
+        
+        # Add heatmap
+        if show_heatmap and heat_data:
+            HeatMap(
+                heat_data,
+                radius=15,
+                blur=10,
+                gradient={0.2: 'blue', 0.4: 'cyan', 0.6: 'lime', 0.8: 'yellow', 1: 'red'}
+            ).add_to(m)
+    
+    # Add monitoring stations
+    if show_stations and not filtered_stations.empty:
+        if 'latitude' in filtered_stations.columns and 'longitude' in filtered_stations.columns:
+            stations_with_coords = filtered_stations[
+                filtered_stations['latitude'].notna() & 
+                filtered_stations['longitude'].notna()
+            ]
+            
+            for _, station in stations_with_coords.iterrows():
+                status = station.get('status', 'Unknown')
+                station_color = 'green' if status == 'Active' else 'orange' if status == 'Maintenance' else 'red'
+                
+                station_popup = f"""
+                <div style="background: #0a192f; color: #e6f1ff; padding: 10px;">
+                    <b>{station.get('station_name', 'Unknown')}</b><br>
+                    Location: {station.get('district_name', 'Unknown')}<br>
+                    Status: <span style="color:{'#00ff9d' if status=='Active' else '#ffd700' if status=='Maintenance' else '#ff4444'};">{status}</span><br>
+                    pH: {station.get('ph_level', 'N/A')}<br>
+                    DO: {station.get('dissolved_oxygen_mg_l', 'N/A')} mg/L<br>
+                    Turbidity: {station.get('turbidity_ntu', 'N/A')} NTU
+                </div>
+                """
+                
+                folium.Marker(
+                    location=[station['latitude'], station['longitude']],
+                    icon=folium.Icon(color=station_color, icon='info-sign'),
+                    popup=folium.Popup(station_popup, max_width=300),
+                    tooltip=f"Station: {station.get('station_name', 'Unknown')}"
+                ).add_to(m)
+    
+    # Display map
+    st_folium(m, width=1300, height=600)
+    
+    # Map statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Sources on Map", sources_on_map)
+    with col2:
+        st.metric("Total Filtered Sources", len(filtered_sources))
+    with col3:
+        coverage = (sources_on_map/len(filtered_sources)*100) if len(filtered_sources) > 0 else 0
+        st.metric("Coordinate Coverage", f"{coverage:.1f}%")
+    
+    # Legend
+    st.markdown("---")
+    cols = st.columns(5)
+    with cols[0]:
+        st.markdown('<span class="status-dot status-good"></span> Good (≥60%)', unsafe_allow_html=True)
+    with cols[1]:
+        st.markdown('<span class="status-dot status-warning"></span> Moderate (30-60%)', unsafe_allow_html=True)
+    with cols[2]:
+        st.markdown('<span class="status-dot status-critical"></span> Critical (<30%)', unsafe_allow_html=True)
+    with cols[3]:
+        st.markdown('<span class="status-dot" style="background: #4287f5;"></span> Monitoring Station', unsafe_allow_html=True)
+    with cols[4]:
+        st.markdown('🔥 Heatmap Area', unsafe_allow_html=True)
+
+# =====================
+# TAB 3: ANALYTICS (Same as before)
+# =====================
+
+with tab3:
+    st.markdown('<p class="section-header">📈 Advanced Analytics</p>', unsafe_allow_html=True)
+    
+    atab1, atab2, atab3 = st.tabs(["📊 Trends", "📉 Comparisons", "📐 Statistics"])
+    
+    with atab1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Rainfall Trend")
+            if not rainfall.empty and 'record_year' in rainfall.columns and 'rainfall_cm' in rainfall.columns:
+                filtered_rain = rainfall.copy()
+                if selected_district != "All Districts" and 'district_name' in filtered_rain.columns:
+                    filtered_rain = filtered_rain[filtered_rain['district_name'] == selected_district]
+                
+                if not filtered_rain.empty:
+                    rain_trend = filtered_rain.groupby('record_year')['rainfall_cm'].mean().reset_index()
+                    fig = px.line(
+                        rain_trend,
+                        x='record_year',
+                        y='rainfall_cm',
+                        title="Average Rainfall Over Years",
+                        template="plotly_dark",
+                        markers=True
+                    )
+                    fig.update_traces(line_color='#00e5ff', line_width=3)
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("Groundwater Trend")
+            if not groundwater.empty and 'assessment_year' in groundwater.columns and 'avg_depth_meters' in groundwater.columns:
+                filtered_gw = groundwater.copy()
+                if selected_district != "All Districts" and 'district_name' in filtered_gw.columns:
+                    filtered_gw = filtered_gw[filtered_gw['district_name'] == selected_district]
+                
+                if not filtered_gw.empty:
+                    gw_trend = filtered_gw.groupby('assessment_year')['avg_depth_meters'].mean().reset_index()
+                    fig = px.line(
+                        gw_trend,
+                        x='assessment_year',
+                        y='avg_depth_meters',
+                        title="Average Groundwater Depth",
+                        template="plotly_dark",
+                        markers=True
+                    )
+                    fig.update_traces(line_color='#ffd700', line_width=3)
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+    
+    with atab2:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Capacity by State")
+            if not filtered_sources.empty and 'state' in filtered_sources.columns and 'capacity_percent' in filtered_sources.columns:
+                state_cap = filtered_sources.groupby('state')['capacity_percent'].mean().sort_values(ascending=False)
+                if len(state_cap) > 10:
+                    state_cap = state_cap.head(10)
+                
+                if len(state_cap) > 0:
+                    fig = px.bar(
+                        x=state_cap.values,
+                        y=state_cap.index,
+                        orientation='h',
+                        title=f"Average Capacity by State",
+                        template="plotly_dark",
+                        color=state_cap.values,
+                        color_continuous_scale='Tealgrn',
+                        labels={'x': 'Avg Capacity (%)', 'y': 'State'}
+                    )
+                    fig.update_traces(texttemplate='%{x:.1f}%', textposition='outside')
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("Extraction vs Recharge")
+            if not groundwater.empty and 'recharge_rate_mcm' in groundwater.columns and 'extraction_pct' in groundwater.columns:
+                filtered_gw = groundwater.copy()
+                if selected_district != "All Districts" and 'district_name' in filtered_gw.columns:
+                    filtered_gw = filtered_gw[filtered_gw['district_name'] == selected_district]
+                
+                if not filtered_gw.empty:
+                    fig = px.scatter(
+                        filtered_gw,
+                        x='recharge_rate_mcm',
+                        y='extraction_pct',
+                        size='avg_depth_meters' if 'avg_depth_meters' in filtered_gw.columns else None,
+                        color='district_name' if 'district_name' in filtered_gw.columns else None,
+                        title="Groundwater Extraction vs Recharge",
+                        template="plotly_dark"
+                    )
+                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+    
+    with atab3:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Statistical Summary")
+            if not filtered_sources.empty:
+                stats_cols = []
+                for col in ['capacity_percent', 'age', 'health_score']:
+                    if col in filtered_sources.columns:
+                        stats_cols.append(col)
+                if stats_cols:
+                    stats_df = filtered_sources[stats_cols].describe()
+                    st.dataframe(stats_df.style.format("{:.2f}"), use_container_width=True)
+        
+        with col2:
+            st.subheader("Correlation Matrix")
+            if not filtered_sources.empty and not groundwater.empty:
+                if 'district' in filtered_sources.columns and 'district_name' in groundwater.columns:
+                    merged = filtered_sources.merge(
+                        groundwater,
+                        left_on='district',
+                        right_on='district_name',
+                        how='inner'
+                    )
+                    
+                    if not merged.empty:
+                        numeric_cols = [col for col in ['capacity_percent', 'age', 'avg_depth_meters', 'extraction_pct', 'recharge_rate_mcm'] 
+                                      if col in merged.columns]
+                        
+                        if len(numeric_cols) >= 2:
+                            corr_data = merged[numeric_cols].dropna()
+                            if not corr_data.empty:
+                                corr_matrix = corr_data.corr()
+                                fig = px.imshow(
+                                    corr_matrix,
+                                    text_auto=True,
+                                    aspect="auto",
+                                    title="Correlation Matrix",
+                                    template="plotly_dark",
+                                    color_continuous_scale='RdBu_r'
+                                )
+                                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                                st.plotly_chart(fig, use_container_width=True)
+
+# =====================
+# TAB 4: WATER QUALITY (Same as before)
+# =====================
+
+with tab4:
+    st.markdown('<p class="section-header">💧 Water Quality Monitoring</p>', unsafe_allow_html=True)
+    
+    if not water_quality.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            avg_ph = water_quality['ph_level'].mean() if 'ph_level' in water_quality.columns else 0
+            st.metric("Average pH", f"{avg_ph:.2f}", delta=None)
+        
+        with col2:
+            avg_do = water_quality['dissolved_oxygen'].mean() if 'dissolved_oxygen' in water_quality.columns else 0
+            st.metric("Dissolved Oxygen", f"{avg_do:.1f} mg/L", delta=None)
+        
+        with col3:
+            avg_turbidity = water_quality['turbidity'].mean() if 'turbidity' in water_quality.columns else 0
+            st.metric("Turbidity", f"{avg_turbidity:.1f} NTU", delta=None)
+        
+        with col4:
+            avg_tds = water_quality['tds'].mean() if 'tds' in water_quality.columns else 0
+            st.metric("Total Dissolved Solids", f"{avg_tds:.0f} ppm", delta=None)
+        
+        st.markdown("---")
+        
+        # Water Quality Charts
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if 'ph_level' in water_quality.columns:
+                fig = px.histogram(
+                    water_quality,
+                    x='ph_level',
+                    nbins=20,
+                    title="pH Distribution",
+                    template="plotly_dark",
+                    color_discrete_sequence=['#00e5ff']
+                )
+                fig.add_vline(x=7, line_dash="dash", line_color="white")
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            if 'dissolved_oxygen' in water_quality.columns:
+                fig = px.box(
+                    water_quality,
+                    y='dissolved_oxygen',
+                    title="Dissolved Oxygen Distribution",
+                    template="plotly_dark",
+                    color_discrete_sequence=['#00ff9d']
+                )
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig, use_container_width=True)
+        
+         # --- Corrected Water Quality Table ---
+st.markdown("### Recent Water Quality Readings")
+
+# Updated these names to match your Neon database exactly
+display_cols = [
+    'station_name', 
+    'district_name', 
+    'ph_level', 
+    'dissolved_oxygen_mg_l', 
+    'turbidity_ntu', 
+    'status'
+]
+
+# Safety check: only use columns that actually exist in your dataframe
+available_cols = [col for col in display_cols if col in water_quality.columns]
+
+if not water_quality.empty and available_cols:
+    # We remove sort_values('measurement_date') because that column doesn't exist in your Neon table yet
+    st.dataframe(
+        water_quality[available_cols].head(50),
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # Optional: Add a success message to show data is live
+    st.caption(f"Showing {len(water_quality.head(50))} live readings from Neon Cloud.")
+else:
+    st.info("No water quality data available. Please check if 'water_monitoring_stations' table is loaded.")
+
+
+# =====================
+# TAB 5: ALERTS (Same as before)
+# =====================
+
+with tab5:
+    st.markdown('<p class="section-header">🚨 Active Alerts and Warnings</p>', unsafe_allow_html=True)
+    
+    if not alerts.empty:
+        # Alert counts
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            critical_count = len(alerts[alerts['alert_status'] == 'CRITICAL']) if 'alert_status' in alerts.columns else 0
+            st.markdown(f'<div class="alert-critical">🔴 CRITICAL: {critical_count}</div>', unsafe_allow_html=True)
+        
+        with col2:
+            warning_count = len(alerts[alerts['alert_status'] == 'WARNING']) if 'alert_status' in alerts.columns else 0
+            st.markdown(f'<div class="alert-warning">🟡 WARNING: {warning_count}</div>', unsafe_allow_html=True)
+        
+        with col3:
+            stable_count = len(alerts[alerts['alert_status'] == 'STABLE']) if 'alert_status' in alerts.columns else 0
+            st.markdown(f'<div class="alert-good">🟢 STABLE: {stable_count}</div>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Filter alerts
+        filtered_alerts = alerts.copy()
+        
+        if not sources.empty and 'source_name' in sources.columns:
+            if selected_state != "All States" and 'state' in sources.columns:
+                state_sources = sources[sources['state'] == selected_state]['source_name'].tolist()
+                if 'source_name' in filtered_alerts.columns:
+                    filtered_alerts = filtered_alerts[filtered_alerts['source_name'].isin(state_sources)]
+            
+            if selected_district != "All Districts" and 'district' in sources.columns:
+                district_sources = sources[sources['district'] == selected_district]['source_name'].tolist()
+                if 'source_name' in filtered_alerts.columns:
+                    filtered_alerts = filtered_alerts[filtered_alerts['source_name'].isin(district_sources)]
+        
+        if filtered_alerts.empty:
+            st.success("✅ No alerts match the current filters")
+        else:
+            # Display alerts
+            for _, alert in filtered_alerts.iterrows():
+                source_info = None
+                if not sources.empty and 'source_name' in sources.columns:
+                    source_matches = sources[sources['source_name'] == alert.get('source_name', '')]
+                    if not source_matches.empty:
+                        source_info = source_matches.iloc[0]
+                
+                alert_status = alert.get('alert_status', 'UNKNOWN')
+                
+                if alert_status == 'CRITICAL':
+                    status_class = "alert-critical"
+                    status_emoji = "🔴"
+                elif alert_status == 'WARNING':
+                    status_class = "alert-warning"
+                    status_emoji = "🟡"
+                else:
+                    status_class = "alert-good"
+                    status_emoji = "🟢"
+                
+                source_name = alert.get('source_name', 'Unknown')
+                
+                with st.expander(f"{status_emoji} {source_name} - {alert_status}", expanded=False):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if source_info is not None:
+                            st.markdown(f"**Type:** {source_info.get('source_type', 'Unknown')}")
+                            st.markdown(f"**Location:** {source_info.get('district', 'Unknown')}, {source_info.get('state', 'Unknown')}")
+                        else:
+                            st.markdown(f"**Type:** Unknown")
+                            st.markdown(f"**Location:** Unknown")
+                        
+                        capacity = alert.get('capacity_percent', 0)
+                        st.markdown(f"**Capacity:** {capacity}%")
+                        st.progress(capacity/100 if capacity > 0 else 0)
+                    
+                    with col2:
+                        st.markdown(f"**pH Level:** {alert.get('ph_level', 'N/A')}")
+                        st.markdown(f"**Time:** {alert.get('alert_time', 'N/A')}")
+                        
+                        if alert_status == 'CRITICAL':
+                            st.markdown(f"**Status:** :red[{alert_status}]")
+                            st.markdown("**Action Required:** Immediate inspection needed")
+                        elif alert_status == 'WARNING':
+                            st.markdown(f"**Status:** :orange[{alert_status}]")
+                            st.markdown("**Action Required:** Schedule maintenance")
+                        else:
+                            st.markdown(f"**Status:** :green[{alert_status}]")
+                            st.markdown("**Action Required:** Monitor routinely")
+    else:
+        st.success("✅ No active alerts - All systems normal")
+        st.balloons()
+
+# =====================
+# TAB 6: DATA TABLES (Same as before)
+# =====================
+
+with tab6:
+    st.markdown('<p class="section-header">📋 Data Explorer</p>', unsafe_allow_html=True)
+    
+    table_choice = st.selectbox(
+        "Select Table to View",
+        ["Water Sources", "Monitoring Stations", "Groundwater Levels", 
+         "Rainfall History", "Water Usage", "Water Quality", "Active Alerts", "Regional Statistics"]
+    )
+    
+    if table_choice == "Water Sources":
+        display_df = filtered_sources if not filtered_sources.empty else sources
+        if not display_df.empty:
+            available_cols = [col for col in ['source_id', 'source_name', 'source_type', 'capacity_percent', 
+                                             'max_capacity_mcm', 'build_year', 'age', 'state', 'district', 
+                                             'origin_state', 'is_transboundary', 'risk_level', 'health_score', 'trend']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # Download button
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download CSV",
+                csv,
+                f"water_sources_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                "text/csv"
+            )
+    
+    elif table_choice == "Monitoring Stations":
+        display_df = filtered_stations if not filtered_stations.empty else stations
+        if not display_df.empty:
+            available_cols = [col for col in ['station_id', 'station_name', 'state_name', 'district_name', 
+                                             'latitude', 'longitude', 'ph_level', 'dissolved_oxygen_mg_l', 
+                                             'turbidity_ntu', 'status', 'last_maintenance']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, f"stations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv")
+    
+    elif table_choice == "Groundwater Levels":
+        display_df = groundwater.copy()
+        if selected_district != "All Districts" and 'district_name' in display_df.columns:
+            display_df = display_df[display_df['district_name'] == selected_district]
+        
+        if not display_df.empty:
+            available_cols = [col for col in ['id', 'district_name', 'avg_depth_meters', 'extraction_pct', 
+                                             'recharge_rate_mcm', 'assessment_year', 'stress_level', 
+                                             'depletion_rate']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, f"groundwater_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv")
+    
+    elif table_choice == "Rainfall History":
+        display_df = rainfall.copy()
+        if selected_district != "All Districts" and 'district_name' in display_df.columns:
+            display_df = display_df[display_df['district_name'] == selected_district]
+        
+        if not display_df.empty:
+            available_cols = [col for col in ['id', 'district_name', 'rainfall_cm', 'record_year', 'season', 
+                                             'rainfall_category', 'deviation_pct']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, f"rainfall_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv")
+    
+    elif table_choice == "Water Usage":
+        display_df = usage.copy()
+        if selected_state != "All States" and 'state' in display_df.columns:
+            display_df = display_df[display_df['state'] == selected_state]
+        if selected_district != "All Districts" and 'district' in display_df.columns:
+            display_df = display_df[display_df['district'] == selected_district]
+        
+        if not display_df.empty:
+            available_cols = [col for col in ['usage_id', 'source_name', 'source_type', 'sector', 'sub_sector', 
+                                             'consumer_name', 'consumption_mcm', 'record_year', 'season', 
+                                             'state', 'district']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, f"usage_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv")
+    
+    elif table_choice == "Water Quality":
+        display_df = water_quality.copy()
+        if not display_df.empty:
+            available_cols = [col for col in ['quality_id', 'station_name', 'measurement_date', 'ph_level', 
+                                             'dissolved_oxygen', 'turbidity', 'tds', 'temperature', 
+                                             'conductivity', 'hardness']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, f"water_quality_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv")
+    
+    elif table_choice == "Active Alerts":
+        display_df = alerts.copy()
+        if not display_df.empty:
+            available_cols = [col for col in ['alert_id', 'source_name', 'capacity_percent', 'ph_level', 
+                                             'alert_status', 'alert_time']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, f"alerts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv")
+    
+    elif table_choice == "Regional Statistics":
+        display_df = regional.copy()
+        if not display_df.empty:
+            available_cols = [col for col in ['region_id', 'region_name', 'population_count', 'annual_rainfall_avg_cm']
+                            if col in display_df.columns]
+            display_df = display_df[available_cols] if available_cols else display_df
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, f"regional_stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", "text/csv")
+
+# =====================
+# TAB 7: ADMIN PANEL (Only visible to authenticated admins)
+# =====================
+
+if is_admin:
+    with tab7:
+        st.markdown('<p class="section-header">👑 Admin Control Panel</p>', unsafe_allow_html=True)
+        st.warning("⚠️ **Admin Access Only** - All changes are permanent and affect the live database")
+        
+        # Create tabs for different CRUD operations
+        admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5 = st.tabs([
+            "💧 Water Sources",
+            "📡 Monitoring Stations",
+            "⚠️ Alerts",
+            "🌊 Groundwater",
+            "☔ Rainfall"
+        ])
+        
+        # ===== WATER SOURCES MANAGEMENT =====
+        with admin_tab1:
+            st.markdown("### Manage Water Sources")
+            
+            # Action selector
+            action = st.radio(
+                "Select Action",
+                ["➕ Add New Source", "✏️ Update Existing Source", "🗑️ Delete Source"],
+                horizontal=True
+            )
+            
+            if action == "➕ Add New Source":
+                st.markdown("#### Add New Water Source")
+                
+                with st.form("add_source_form"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        source_name = st.text_input("Source Name*")
+                        source_type = st.selectbox("Source Type*", ["Dam", "Reservoir", "River", "Canal", "Lake", "Pond", "Well"])
+                        capacity_percent = st.slider("Current Capacity %*", 0, 100, 50)
+                        max_capacity_mcm = st.number_input("Max Capacity (MCM)*", min_value=0.0, value=100.0)
+                        current_capacity_mcm = st.number_input("Current Capacity (MCM)*", min_value=0.0, value=50.0)
+                        build_year = st.number_input("Build Year*", min_value=1800, max_value=2026, value=2000)
+                    
+                    with col2:
+                        state = st.text_input("State*")
+                        district = st.text_input("District*")
+                        origin_state = st.text_input("Origin State")
+                        is_transboundary = st.checkbox("Is Transboundary?")
+                        latitude = st.number_input("Latitude", value=20.5937, format="%.6f")
+                        longitude = st.number_input("Longitude", value=78.9629, format="%.6f")
+                    
+                    submitted = st.form_submit_button("➕ Add Source")
+                    
+                    if submitted:
+                        if not source_name or not source_type or not state or not district:
+                            st.error("Please fill all required fields")
+                        else:
+                            data = {
+                                'source_name': source_name,
+                                'source_type': source_type,
+                                'capacity_percent': capacity_percent,
+                                'max_capacity_mcm': max_capacity_mcm,
+                                'current_capacity_mcm': current_capacity_mcm,
+                                'build_year': build_year,
+                                'state': state,
+                                'district': district,
+                                'origin_state': origin_state if origin_state else None,
+                                'is_transboundary': is_transboundary,
+                                'latitude': latitude if latitude else None,
+                                'longitude': longitude if longitude else None
+                            }
+                            
+                            if add_water_source(data):
+                                st.success(f"✅ Source '{source_name}' added successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to add source")
+            
+            elif action == "✏️ Update Existing Source":
+                st.markdown("#### Update Water Source")
+                
+                if not filtered_sources.empty:
+                    # Select source to update
+                    source_options = filtered_sources['source_name'].tolist() if 'source_name' in filtered_sources.columns else []
+                    selected_source = st.selectbox("Select Source to Update", source_options)
+                    
+                    if selected_source:
+                        source_data = filtered_sources[filtered_sources['source_name'] == selected_source].iloc[0]
+                        
+                        with st.form("update_source_form"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                source_name = st.text_input("Source Name*", value=source_data.get('source_name', ''))
+                                source_type = st.selectbox("Source Type*", 
+                                                          ["Dam", "Reservoir", "River", "Canal", "Lake", "Pond", "Well"],
+                                                          index=["Dam", "Reservoir", "River", "Canal", "Lake", "Pond", "Well"].index(source_data.get('source_type', 'Dam')) if source_data.get('source_type', 'Dam') in ["Dam", "Reservoir", "River", "Canal", "Lake", "Pond", "Well"] else 0)
+                                capacity_percent = st.slider("Current Capacity %*", 0, 100, int(source_data.get('capacity_percent', 50)))
+                                max_capacity_mcm = st.number_input("Max Capacity (MCM)*", min_value=0.0, value=float(source_data.get('max_capacity_mcm', 100)))
+                                current_capacity_mcm = st.number_input("Current Capacity (MCM)*", min_value=0.0, value=float(source_data.get('current_capacity_mcm', 50)))
+                                build_year = st.number_input("Build Year*", min_value=1800, max_value=2026, value=int(source_data.get('build_year', 2000)))
+                            
+                            with col2:
+                                state = st.text_input("State*", value=source_data.get('state', ''))
+                                district = st.text_input("District*", value=source_data.get('district', ''))
+                                origin_state = st.text_input("Origin State", value=source_data.get('origin_state', ''))
+                                is_transboundary = st.checkbox("Is Transboundary?", value=bool(source_data.get('is_transboundary', False)))
+                                latitude = st.number_input("Latitude", value=float(source_data.get('latitude', 20.5937)), format="%.6f")
+                                longitude = st.number_input("Longitude", value=float(source_data.get('longitude', 78.9629)), format="%.6f")
+                            
+                            submitted = st.form_submit_button("✏️ Update Source")
+                            
+                            if submitted:
+                                data = {
+                                    'source_name': source_name,
+                                    'source_type': source_type,
+                                    'capacity_percent': capacity_percent,
+                                    'max_capacity_mcm': max_capacity_mcm,
+                                    'current_capacity_mcm': current_capacity_mcm,
+                                    'build_year': build_year,
+                                    'state': state,
+                                    'district': district,
+                                    'origin_state': origin_state if origin_state else None,
+                                    'is_transboundary': is_transboundary,
+                                    'latitude': latitude if latitude else None,
+                                    'longitude': longitude if longitude else None
+                                }
+                                
+                                if update_water_source(source_data.get('source_id'), data):
+                                    st.success(f"✅ Source '{source_name}' updated successfully!")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to update source")
+                else:
+                    st.info("No sources available to update")
+            
+            elif action == "🗑️ Delete Source":
+                st.markdown("#### Delete Water Source")
+                st.warning("⚠️ This action cannot be undone!")
+                
+                if not filtered_sources.empty:
+                    source_options = filtered_sources['source_name'].tolist() if 'source_name' in filtered_sources.columns else []
+                    selected_source = st.selectbox("Select Source to Delete", source_options)
+                    
+                    if selected_source:
+                        source_data = filtered_sources[filtered_sources['source_name'] == selected_source].iloc[0]
+                        
+                        st.markdown(f"**You are about to delete:** {selected_source}")
+                        st.markdown(f"**Type:** {source_data.get('source_type', 'Unknown')}")
+                        st.markdown(f"**Location:** {source_data.get('district', 'Unknown')}, {source_data.get('state', 'Unknown')}")
+                        
+                        confirm = st.checkbox("I understand this is permanent")
+                        if st.button("🗑️ Delete Source", disabled=not confirm):
+                            if delete_water_source(source_data.get('source_id')):
+                                st.success(f"✅ Source '{selected_source}' deleted successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete source")
+                else:
+                    st.info("No sources available to delete")
+        
+        # ===== MONITORING STATIONS MANAGEMENT =====
+        with admin_tab2:
+            st.markdown("### Manage Monitoring Stations")
+            
+            action = st.radio(
+                "Select Action",
+                ["➕ Add New Station", "✏️ Update Station", "🗑️ Delete Station"],
+                horizontal=True,
+                key="station_action"
+            )
+            
+            if action == "➕ Add New Station":
+                with st.form("add_station_form"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        station_name = st.text_input("Station Name*")
+                        state_name = st.text_input("State*")
+                        district_name = st.text_input("District*")
+                        latitude = st.number_input("Latitude*", value=20.5937, format="%.6f")
+                        longitude = st.number_input("Longitude*", value=78.9629, format="%.6f")
+                    
+                    with col2:
+                        ph_level = st.number_input("pH Level", value=7.0, format="%.2f")
+                        dissolved_oxygen = st.number_input("Dissolved Oxygen (mg/L)", value=5.0, format="%.2f")
+                        turbidity = st.number_input("Turbidity (NTU)", value=2.0, format="%.2f")
+                        status = st.selectbox("Status", ["Active", "Maintenance", "Inactive"])
+                    
+                    submitted = st.form_submit_button("➕ Add Station")
+                    
+                    if submitted:
+                        if not station_name or not state_name or not district_name:
+                            st.error("Please fill all required fields")
+                        else:
+                            data = {
+                                'station_name': station_name,
+                                'state_name': state_name,
+                                'district_name': district_name,
+                                'latitude': latitude,
+                                'longitude': longitude,
+                                'ph_level': ph_level,
+                                'dissolved_oxygen_mg_l': dissolved_oxygen,
+                                'turbidity_ntu': turbidity,
+                                'status': status
+                            }
+                            
+                            if add_monitoring_station(data):
+                                st.success(f"✅ Station '{station_name}' added successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to add station")
+            
+            elif action == "✏️ Update Station":
+                if not filtered_stations.empty:
+                    station_options = filtered_stations['station_name'].tolist() if 'station_name' in filtered_stations.columns else []
+                    selected_station = st.selectbox("Select Station to Update", station_options, key="update_station")
+                    
+                    if selected_station:
+                        station_data = filtered_stations[filtered_stations['station_name'] == selected_station].iloc[0]
+                        
+                        with st.form("update_station_form"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                station_name = st.text_input("Station Name*", value=station_data.get('station_name', ''))
+                                state_name = st.text_input("State*", value=station_data.get('state_name', ''))
+                                district_name = st.text_input("District*", value=station_data.get('district_name', ''))
+                                latitude = st.number_input("Latitude*", value=float(station_data.get('latitude', 20.5937)), format="%.6f")
+                                longitude = st.number_input("Longitude*", value=float(station_data.get('longitude', 78.9629)), format="%.6f")
+                            
+                            with col2:
+                                ph_level = st.number_input("pH Level", value=float(station_data.get('ph_level', 7.0)), format="%.2f")
+                                dissolved_oxygen = st.number_input("Dissolved Oxygen (mg/L)", value=float(station_data.get('dissolved_oxygen_mg_l', 5.0)), format="%.2f")
+                                turbidity = st.number_input("Turbidity (NTU)", value=float(station_data.get('turbidity_ntu', 2.0)), format="%.2f")
+                                status = st.selectbox("Status", ["Active", "Maintenance", "Inactive"], 
+                                                     index=["Active", "Maintenance", "Inactive"].index(station_data.get('status', 'Active')) if station_data.get('status', 'Active') in ["Active", "Maintenance", "Inactive"] else 0)
+                            
+                            submitted = st.form_submit_button("✏️ Update Station")
+                            
+                            if submitted:
+                                data = {
+                                    'station_name': station_name,
+                                    'state_name': state_name,
+                                    'district_name': district_name,
+                                    'latitude': latitude,
+                                    'longitude': longitude,
+                                    'ph_level': ph_level,
+                                    'dissolved_oxygen_mg_l': dissolved_oxygen,
+                                    'turbidity_ntu': turbidity,
+                                    'status': status
+                                }
+                                
+                                if update_monitoring_station(station_data.get('station_id'), data):
+                                    st.success(f"✅ Station '{station_name}' updated successfully!")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to update station")
+                else:
+                    st.info("No stations available to update")
+            
+            elif action == "🗑️ Delete Station":
+                st.warning("⚠️ This action cannot be undone!")
+                
+                if not filtered_stations.empty:
+                    station_options = filtered_stations['station_name'].tolist() if 'station_name' in filtered_stations.columns else []
+                    selected_station = st.selectbox("Select Station to Delete", station_options, key="delete_station")
+                    
+                    if selected_station:
+                        station_data = filtered_stations[filtered_stations['station_name'] == selected_station].iloc[0]
+                        
+                        st.markdown(f"**You are about to delete:** {selected_station}")
+                        st.markdown(f"**Location:** {station_data.get('district_name', 'Unknown')}, {station_data.get('state_name', 'Unknown')}")
+                        
+                        confirm = st.checkbox("I understand this is permanent")
+                        if st.button("🗑️ Delete Station", disabled=not confirm):
+                            if delete_monitoring_station(station_data.get('station_id')):
+                                st.success(f"✅ Station '{selected_station}' deleted successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete station")
+                else:
+                    st.info("No stations available to delete")
+        
+        # ===== ALERTS MANAGEMENT =====
+        with admin_tab3:
+            st.markdown("### Manage Alerts")
+            
+            action = st.radio(
+                "Select Action",
+                ["➕ Add New Alert", "✏️ Update Alert", "🗑️ Delete Alert"],
+                horizontal=True,
+                key="alert_action"
+            )
+            
+            if action == "➕ Add New Alert":
+                with st.form("add_alert_form"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        source_name = st.text_input("Source Name*")
+                        capacity_percent = st.slider("Capacity %*", 0, 100, 50)
+                    
+                    with col2:
+                        ph_level = st.number_input("pH Level", value=7.0, format="%.2f")
+                        alert_status = st.selectbox("Alert Status*", ["CRITICAL", "WARNING", "STABLE"])
+                    
+                    submitted = st.form_submit_button("➕ Add Alert")
+                    
+                    if submitted:
+                        if not source_name:
+                            st.error("Please fill all required fields")
+                        else:
+                            data = {
+                                'source_name': source_name,
+                                'capacity_percent': capacity_percent,
+                                'ph_level': ph_level,
+                                'alert_status': alert_status
+                            }
+                            
+                            if add_alert(data):
+                                st.success(f"✅ Alert for '{source_name}' added successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to add alert")
+            
+            elif action == "✏️ Update Alert":
+                if not alerts.empty:
+                    alert_options = alerts['source_name'].tolist() if 'source_name' in alerts.columns else []
+                    selected_alert = st.selectbox("Select Alert to Update", alert_options, key="update_alert")
+                    
+                    if selected_alert:
+                        alert_data = alerts[alerts['source_name'] == selected_alert].iloc[0]
+                        
+                        with st.form("update_alert_form"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                source_name = st.text_input("Source Name*", value=alert_data.get('source_name', ''))
+                                capacity_percent = st.slider("Capacity %*", 0, 100, int(alert_data.get('capacity_percent', 50)))
+                            
+                            with col2:
+                                ph_level = st.number_input("pH Level", value=float(alert_data.get('ph_level', 7.0)), format="%.2f")
+                                alert_status = st.selectbox("Alert Status*", ["CRITICAL", "WARNING", "STABLE"],
+                                                           index=["CRITICAL", "WARNING", "STABLE"].index(alert_data.get('alert_status', 'WARNING')) if alert_data.get('alert_status', 'WARNING') in ["CRITICAL", "WARNING", "STABLE"] else 1)
+                            
+                            submitted = st.form_submit_button("✏️ Update Alert")
+                            
+                            if submitted:
+                                data = {
+                                    'source_name': source_name,
+                                    'capacity_percent': capacity_percent,
+                                    'ph_level': ph_level,
+                                    'alert_status': alert_status
+                                }
+                                
+                                if update_alert(alert_data.get('alert_id'), data):
+                                    st.success(f"✅ Alert for '{source_name}' updated successfully!")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to update alert")
+                else:
+                    st.info("No alerts available to update")
+            
+            elif action == "🗑️ Delete Alert":
+                st.warning("⚠️ This action cannot be undone!")
+                
+                if not alerts.empty:
+                    alert_options = alerts['source_name'].tolist() if 'source_name' in alerts.columns else []
+                    selected_alert = st.selectbox("Select Alert to Delete", alert_options, key="delete_alert")
+                    
+                    if selected_alert:
+                        alert_data = alerts[alerts['source_name'] == selected_alert].iloc[0]
+                        
+                        st.markdown(f"**You are about to delete alert for:** {selected_alert}")
+                        st.markdown(f"**Status:** {alert_data.get('alert_status', 'Unknown')}")
+                        
+                        confirm = st.checkbox("I understand this is permanent")
+                        if st.button("🗑️ Delete Alert", disabled=not confirm):
+                            if delete_alert(alert_data.get('alert_id')):
+                                st.success(f"✅ Alert for '{selected_alert}' deleted successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete alert")
+                else:
+                    st.info("No alerts available to delete")
+        
+        # ===== GROUNDWATER MANAGEMENT =====
+        with admin_tab4:
+            st.markdown("### Manage Groundwater Data")
+            
+            action = st.radio(
+                "Select Action",
+                ["➕ Add New Data", "✏️ Update Data", "🗑️ Delete Data"],
+                horizontal=True,
+                key="gw_action"
+            )
+            
+            if action == "➕ Add New Data":
+                with st.form("add_gw_form"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        district_name = st.text_input("District Name*")
+                        avg_depth_meters = st.number_input("Average Depth (meters)*", min_value=0.0, value=30.0)
+                        extraction_pct = st.number_input("Extraction %*", min_value=0.0, max_value=100.0, value=50.0)
+                    
+                    with col2:
+                        recharge_rate_mcm = st.number_input("Recharge Rate (MCM)*", min_value=0.0, value=100.0)
+                        assessment_year = st.number_input("Assessment Year*", min_value=2000, max_value=2026, value=2024)
+                    
+                    submitted = st.form_submit_button("➕ Add Data")
+                    
+                    if submitted:
+                        if not district_name:
+                            st.error("Please fill all required fields")
+                        else:
+                            data = {
+                                'district_name': district_name,
+                                'avg_depth_meters': avg_depth_meters,
+                                'extraction_pct': extraction_pct,
+                                'recharge_rate_mcm': recharge_rate_mcm,
+                                'assessment_year': assessment_year
+                            }
+                            
+                            if add_groundwater_data(data):
+                                st.success(f"✅ Groundwater data for '{district_name}' added successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to add groundwater data")
+            
+            elif action == "✏️ Update Data":
+                if not groundwater.empty:
+                    gw_options = groundwater['district_name'].tolist() if 'district_name' in groundwater.columns else []
+                    selected_gw = st.selectbox("Select District to Update", gw_options, key="update_gw")
+                    
+                    if selected_gw:
+                        gw_data = groundwater[groundwater['district_name'] == selected_gw].iloc[0]
+                        
+                        with st.form("update_gw_form"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                district_name = st.text_input("District Name*", value=gw_data.get('district_name', ''))
+                                avg_depth_meters = st.number_input("Average Depth (meters)*", min_value=0.0, value=float(gw_data.get('avg_depth_meters', 30.0)))
+                                extraction_pct = st.number_input("Extraction %*", min_value=0.0, max_value=100.0, value=float(gw_data.get('extraction_pct', 50.0)))
+                            
+                            with col2:
+                                recharge_rate_mcm = st.number_input("Recharge Rate (MCM)*", min_value=0.0, value=float(gw_data.get('recharge_rate_mcm', 100.0)))
+                                assessment_year = st.number_input("Assessment Year*", min_value=2000, max_value=2026, value=int(gw_data.get('assessment_year', 2024)))
+                            
+                            submitted = st.form_submit_button("✏️ Update Data")
+                            
+                            if submitted:
+                                data = {
+                                    'district_name': district_name,
+                                    'avg_depth_meters': avg_depth_meters,
+                                    'extraction_pct': extraction_pct,
+                                    'recharge_rate_mcm': recharge_rate_mcm,
+                                    'assessment_year': assessment_year
+                                }
+                                
+                                if update_groundwater_data(gw_data.get('id'), data):
+                                    st.success(f"✅ Groundwater data for '{district_name}' updated successfully!")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to update groundwater data")
+                else:
+                    st.info("No groundwater data available to update")
+            
+            elif action == "🗑️ Delete Data":
+                st.warning("⚠️ This action cannot be undone!")
+                
+                if not groundwater.empty:
+                    gw_options = groundwater['district_name'].tolist() if 'district_name' in groundwater.columns else []
+                    selected_gw = st.selectbox("Select District to Delete", gw_options, key="delete_gw")
+                    
+                    if selected_gw:
+                        gw_data = groundwater[groundwater['district_name'] == selected_gw].iloc[0]
+                        
+                        st.markdown(f"**You are about to delete data for:** {selected_gw}")
+                        st.markdown(f"**Year:** {gw_data.get('assessment_year', 'Unknown')}")
+                        
+                        confirm = st.checkbox("I understand this is permanent")
+                        if st.button("🗑️ Delete Data", disabled=not confirm):
+                            if delete_groundwater_data(gw_data.get('id')):
+                                st.success(f"✅ Groundwater data for '{selected_gw}' deleted successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete groundwater data")
+                else:
+                    st.info("No groundwater data available to delete")
+        
+        # ===== RAINFALL MANAGEMENT =====
+        with admin_tab5:
+            st.markdown("### Manage Rainfall Data")
+            
+            action = st.radio(
+                "Select Action",
+                ["➕ Add New Data", "✏️ Update Data", "🗑️ Delete Data"],
+                horizontal=True,
+                key="rain_action"
+            )
+            
+            if action == "➕ Add New Data":
+                with st.form("add_rain_form"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        district_name = st.text_input("District Name*")
+                        rainfall_cm = st.number_input("Rainfall (cm)*", min_value=0.0, value=100.0)
+                    
+                    with col2:
+                        record_year = st.number_input("Year*", min_value=1900, max_value=2026, value=2024)
+                        season = st.selectbox("Season*", ["Monsoon", "Winter", "Summer", "Post-Monsoon"])
+                    
+                    submitted = st.form_submit_button("➕ Add Data")
+                    
+                    if submitted:
+                        if not district_name:
+                            st.error("Please fill all required fields")
+                        else:
+                            data = {
+                                'district_name': district_name,
+                                'rainfall_cm': rainfall_cm,
+                                'record_year': record_year,
+                                'season': season
+                            }
+                            
+                            if add_rainfall_data(data):
+                                st.success(f"✅ Rainfall data for '{district_name}' added successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to add rainfall data")
+            
+            elif action == "✏️ Update Data":
+                if not rainfall.empty:
+                    rain_options = rainfall['district_name'].tolist() if 'district_name' in rainfall.columns else []
+                    selected_rain = st.selectbox("Select District to Update", rain_options, key="update_rain")
+                    
+                    if selected_rain:
+                        rain_data = rainfall[rainfall['district_name'] == selected_rain].iloc[0]
+                        
+                        with st.form("update_rain_form"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                district_name = st.text_input("District Name*", value=rain_data.get('district_name', ''))
+                                rainfall_cm = st.number_input("Rainfall (cm)*", min_value=0.0, value=float(rain_data.get('rainfall_cm', 100.0)))
+                            
+                            with col2:
+                                record_year = st.number_input("Year*", min_value=1900, max_value=2026, value=int(rain_data.get('record_year', 2024)))
+                                season = st.selectbox("Season*", ["Monsoon", "Winter", "Summer", "Post-Monsoon"],
+                                                     index=["Monsoon", "Winter", "Summer", "Post-Monsoon"].index(rain_data.get('season', 'Monsoon')) if rain_data.get('season', 'Monsoon') in ["Monsoon", "Winter", "Summer", "Post-Monsoon"] else 0)
+                            
+                            submitted = st.form_submit_button("✏️ Update Data")
+                            
+                            if submitted:
+                                data = {
+                                    'district_name': district_name,
+                                    'rainfall_cm': rainfall_cm,
+                                    'record_year': record_year,
+                                    'season': season
+                                }
+                                
+                                if update_rainfall_data(rain_data.get('id'), data):
+                                    st.success(f"✅ Rainfall data for '{district_name}' updated successfully!")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to update rainfall data")
+                else:
+                    st.info("No rainfall data available to update")
+            
+            elif action == "🗑️ Delete Data":
+                st.warning("⚠️ This action cannot be undone!")
+                
+                if not rainfall.empty:
+                    rain_options = rainfall['district_name'].tolist() if 'district_name' in rainfall.columns else []
+                    selected_rain = st.selectbox("Select District to Delete", rain_options, key="delete_rain")
+                    
+                    if selected_rain:
+                        rain_data = rainfall[rainfall['district_name'] == selected_rain].iloc[0]
+                        
+                        st.markdown(f"**You are about to delete data for:** {selected_rain}")
+                        st.markdown(f"**Year:** {rain_data.get('record_year', 'Unknown')}")
+                        st.markdown(f"**Season:** {rain_data.get('season', 'Unknown')}")
+                        
+                        confirm = st.checkbox("I understand this is permanent")
+                        if st.button("🗑️ Delete Data", disabled=not confirm):
+                            if delete_rainfall_data(rain_data.get('id')):
+                                st.success(f"✅ Rainfall data for '{selected_rain}' deleted successfully!")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete rainfall data")
+                else:
+                    st.info("No rainfall data available to delete")
+
+# =====================
+# SIDEBAR FILTER SUMMARY
+# =====================
+
+with st.sidebar.expander("📊 Current Filter Summary", expanded=False):
+    st.markdown(f"""
+    **Time Range:** {year_range[0]} - {year_range[1]}
+    
+    **Geography:**
+    - State: {selected_state}
+    - District: {selected_district}
+    
+    **Source Filters:**
+    - Type: {selected_type}
+    - Capacity: {capacity_range[0]}% - {capacity_range[1]}%
+    - Risk: {selected_risk}
+    
+    **Results:**
+    - Sources: {len(filtered_sources)} of {len(sources)}
+    - On Map: {len(filtered_sources[filtered_sources['latitude'].notna()]) if not filtered_sources.empty and 'latitude' in filtered_sources.columns else 0}
+    """)
+
+# =====================
+# EXPORT ALL FILTERED DATA
+# =====================
+
+st.sidebar.markdown("---")
+if st.sidebar.button("📦 Export All Filtered Data", use_container_width=True):
+    export_data = {
+        'water_sources': filtered_sources,
+        'monitoring_stations': filtered_stations,
+        'groundwater': groundwater[groundwater['district_name'].isin(filtered_sources['district'].unique())] if not filtered_sources.empty and not groundwater.empty and 'district' in filtered_sources.columns and 'district_name' in groundwater.columns else pd.DataFrame(),
+        'rainfall': rainfall[rainfall['district_name'].isin(filtered_sources['district'].unique())] if not filtered_sources.empty and not rainfall.empty and 'district' in filtered_sources.columns and 'district_name' in rainfall.columns else pd.DataFrame(),
+        'water_quality': water_quality if not water_quality.empty else pd.DataFrame(),
+        'alerts': alerts if not alerts.empty else pd.DataFrame()
+    }
+    
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name, df in export_data.items():
+            if not df.empty:
+                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)  # Sheet names max 31 chars
+    
+    st.sidebar.download_button(
+        "📥 Download Excel Report",
+        output.getvalue(),
+        f"aquastat_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+# =====================
+# FOOTER
+# =====================
+
+st.markdown("---")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("""
+    <div style="text-align: center;">
+        <p style="color: #00e5ff; font-size: 1.2rem; margin:0;">💧 AQUASTAT</p>
+        <p style="color: #8892b0; margin:0;">National Water Command Center</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown(f"""
+    <div style="text-align: center;">
+        <p style="color: #8892b0; margin:0;">Data Source: Ministry of Jal Shakti</p>
+        <p style="color: #8892b0; margin:0;">Last Updated: {current_time.strftime('%Y-%m-%d %H:%M:%S IST')}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col3:
+    st.markdown("""
+    <div style="text-align: center;">
+        <p style="color: #8892b0; margin:0;">© 2025 All Rights Reserved</p>
+        <p style="color: #8892b0; margin:0;">Version 3.0 | For Official Use</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Auto-refresh indicator
+st.markdown("""
+<div style="position: fixed; bottom: 10px; right: 10px; background: rgba(0,229,255,0.1); padding: 5px 10px; border-radius: 5px; font-size: 0.8rem;">
+    🔄 Auto-refresh every 5 minutes • Cloud Connected
+</div>
+""", unsafe_allow_html=True)
+
+# Add auto-refresh functionality
+if st.button("🔄 Refresh Data", key="refresh_button"):
+    st.cache_data.clear()
+    st.rerun()
